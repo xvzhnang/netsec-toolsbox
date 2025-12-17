@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
+import { categoriesConfig, syncCategoryConfigToData } from '@/stores/categories'
 
 interface SubCategoryConfig {
   id: string
@@ -21,47 +22,8 @@ interface CategoryConfig {
   subCategories?: SubCategoryConfig[]
 }
 
-const initialCategories: CategoryConfig[] = [
-  {
-    id: 'web',
-    name: 'WEB',
-    label: 'Web 攻击与防御',
-    description: 'Web 相关攻击与防御工具集合。',
-    icon: 'globe',
-    color: '#4DA3FF',
-    order: 1,
-    enabled: true,
-    subCategories: [
-      {
-        id: 'web-info',
-        name: '信息收集',
-        description: '基础资产信息、指纹识别、子域名枚举。',
-        order: 1,
-        enabled: true,
-      },
-      {
-        id: 'web-dir',
-        name: '目录与文件扫描',
-        description: '敏感目录/文件爆破、备份文件探测。',
-        order: 2,
-        enabled: true,
-      },
-    ],
-  },
-  {
-    id: 'misc',
-    name: 'MISC',
-    label: '杂项工具',
-    description: '杂项安全工具与小脚本集合。',
-    icon: 'apps',
-    color: '#A78BFA',
-    order: 2,
-    enabled: true,
-    subCategories: [],
-  },
-]
-
-const categories = ref<CategoryConfig[]>([...initialCategories])
+// 使用 store 中的 categoriesConfig
+const categories = categoriesConfig
 const selectedId = ref<string | null>(categories.value[0]?.id ?? null)
 
 const selected = computed({
@@ -73,6 +35,10 @@ const selected = computed({
     const idx = categories.value.findIndex((c) => c.id === value.id)
     if (idx !== -1) {
       categories.value[idx] = { ...value }
+      // 触发响应式更新
+      categories.value = [...categories.value]
+      // 同步配置到分类数据
+      syncCategoryConfigToData(value.id)
     }
   },
 })
@@ -97,6 +63,10 @@ const onAdd = () => {
     subCategories: [],
   }
   categories.value.push(newCategory)
+  // 同步配置到分类数据
+  syncCategoryConfigToData(newId)
+  // 触发响应式更新
+  categories.value = [...categories.value]
   selectedId.value = newId
 }
 
@@ -118,6 +88,12 @@ const onAddSub = () => {
     selected.value.subCategories = []
   }
   selected.value.subCategories.push(newSub)
+  // 触发响应式更新
+  const categoryIndex = categories.value.findIndex(c => c.id === selected.value?.id)
+  if (categoryIndex >= 0) {
+    categories.value[categoryIndex] = { ...categories.value[categoryIndex] }
+    categories.value = [...categories.value]
+  }
   editingSub.value = newSub
   isAddingSub.value = true
 }
@@ -136,6 +112,12 @@ const onSaveSub = () => {
   } else {
     subCategories.push({ ...editingSub.value })
   }
+  // 触发响应式更新
+  const categoryIndex = categories.value.findIndex(c => c.id === selected.value?.id)
+  if (categoryIndex >= 0) {
+    categories.value[categoryIndex] = { ...categories.value[categoryIndex] }
+    categories.value = [...categories.value]
+  }
   editingSub.value = null
   isAddingSub.value = false
 }
@@ -147,6 +129,12 @@ const onDeleteSub = (subId: string) => {
   const idx = subCategories.findIndex((s) => s.id === subId)
   if (idx !== -1) {
     subCategories.splice(idx, 1)
+    // 触发响应式更新
+    const categoryIndex = categories.value.findIndex(c => c.id === selected.value?.id)
+    if (categoryIndex >= 0) {
+      categories.value[categoryIndex] = { ...categories.value[categoryIndex] }
+      categories.value = [...categories.value]
+    }
   }
   if (editingSub.value?.id === subId) {
     editingSub.value = null
@@ -158,6 +146,39 @@ const onCancelSub = () => {
   editingSub.value = null
   isAddingSub.value = false
 }
+
+// 删除分类
+const onDeleteCategory = (categoryId: string) => {
+  if (!confirm('确定删除此分类？删除后无法恢复。')) return
+  const idx = categories.value.findIndex((c) => c.id === categoryId)
+  if (idx !== -1) {
+    categories.value.splice(idx, 1)
+    // 触发响应式更新
+    categories.value = [...categories.value]
+    // 如果删除的是当前选中的分类，切换到第一个分类
+    if (selectedId.value === categoryId) {
+      selectedId.value = categories.value[0]?.id ?? null
+    }
+  }
+}
+
+// 监听 selected 的变化，确保通过 v-model 修改属性时也能触发响应式更新
+watch(
+  () => selected.value,
+  (newVal) => {
+    if (newVal) {
+      // 当 selected 变化时，触发响应式更新
+      const categoryIndex = categories.value.findIndex(c => c.id === newVal.id)
+      if (categoryIndex >= 0) {
+        categories.value[categoryIndex] = { ...categories.value[categoryIndex] }
+        categories.value = [...categories.value]
+        // 同步配置到分类数据
+        syncCategoryConfigToData(newVal.id)
+      }
+    }
+  },
+  { deep: true, immediate: false }
+)
 </script>
 
 <template>
@@ -198,6 +219,9 @@ const onCancelSub = () => {
           <h2>{{ selected.label || selected.name }}</h2>
           <p>编辑分类的基础信息与展示样式。</p>
         </div>
+        <button type="button" class="btn-tiny danger" @click="onDeleteCategory(selected.id)">
+          删除分类
+        </button>
       </header>
 
       <div class="editor-body">
@@ -444,6 +468,17 @@ const onCancelSub = () => {
   display: flex;
   flex-direction: column;
   padding: 20px 24px;
+}
+
+.editor-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.editor-header > div {
+  flex: 1;
 }
 
 .editor-header h2 {

@@ -274,6 +274,8 @@ const categoryMenuItems = computed<MenuItem[]>(() => {
             const idx = categoriesRef.value.findIndex((c) => c.id === categoryId)
             if (idx !== -1) {
               categoriesRef.value.splice(idx, 1)
+              // 触发响应式更新
+              categoriesRef.value = [...categoriesRef.value]
             }
           },
           'danger',
@@ -407,6 +409,8 @@ const saveCategory = () => {
       enabled: true,
     })
   }
+  // 触发响应式更新
+  categoriesRef.value = [...categoriesRef.value]
   // 同步配置到分类数据，确保CategoryView能访问到新分类
   syncCategoryConfigToData(categoryForm.value.id)
   showCategoryModal.value = false
