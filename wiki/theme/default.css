@@ -1,0 +1,53 @@
+/* Wiki 默认主题 - 用户可以修改此文件来自定义样式 */
+
+/* 如果需要创建新主题，请复制此文件并重命名，例如 dark.css */
+
+/* 自定义主色调 */
+:root {
+  --wiki-primary-color: #0366d6;
+  --wiki-bg-color: #ffffff;
+  --wiki-text-color: #24292e;
+  --wiki-border-color: #e1e4e8;
+  --wiki-sidebar-bg: #f6f8fa;
+}
+
+/* 深色主题示例（取消注释以启用） */
+/*
+@media (prefers-color-scheme: dark) {
+  :root {
+    --wiki-primary-color: #58a6ff;
+    --wiki-bg-color: #0d1117;
+    --wiki-text-color: #c9d1d9;
+    --wiki-border-color: #30363d;
+    --wiki-sidebar-bg: #161b22;
+  }
+}
+*/
+
+/* 自定义字体 */
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  /* 可以修改为其他字体，例如： */
+  /* font-family: 'Microsoft YaHei', 'SimHei', sans-serif; */
+}
+
+/* 自定义链接颜色 */
+.markdown-body a {
+  color: var(--wiki-primary-color);
+}
+
+/* 自定义代码块背景 */
+.markdown-body pre {
+  background-color: #f6f8fa;
+  /* 深色主题代码块： */
+  /* background-color: #161b22; */
+}
+
+/* 自定义侧边栏样式 */
+.wiki-sidebar {
+  background-color: var(--wiki-sidebar-bg);
+  border-right-color: var(--wiki-border-color);
+}
+
+/* 更多自定义样式可以在这里添加 */
+

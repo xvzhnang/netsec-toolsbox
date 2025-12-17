@@ -49,3 +49,29 @@ pub fn get_file_dir(file_path: &str) -> PathBuf {
   }
 }
 
+/// 获取 Wiki 目录路径（在同级目录下，不在 .config 下）
+pub fn get_wiki_dir() -> PathBuf {
+  // 使用当前工作目录下的 wiki 文件夹
+  let current_dir = std::env::current_dir()
+    .expect("failed to get current directory");
+  let wiki_dir = current_dir.join("wiki");
+  
+  // 确保 wiki 目录存在
+  std::fs::create_dir_all(&wiki_dir)
+    .expect("failed to create wiki directory");
+  
+  wiki_dir
+}
+
+/// 获取 Wiki 主题目录路径（在 wiki 目录下的 theme 文件夹）
+pub fn get_theme_dir() -> PathBuf {
+  let wiki_dir = get_wiki_dir();
+  let theme_dir = wiki_dir.join("theme");
+  
+  // 确保主题目录存在
+  std::fs::create_dir_all(&theme_dir)
+    .expect("failed to create theme directory");
+  
+  theme_dir
+}
+

@@ -176,3 +176,62 @@ export async function waitForTauriAPI(timeout = 5000): Promise<boolean> {
   return false
 }
 
+/**
+ * 使用系统默认浏览器打开 URL
+ * @param url 要打开的 URL
+ */
+/**
+ * 使用系统默认浏览器打开 URL
+ * 优先使用 Tauri shell API，如果不可用则降级到后端命令，最后降级到 window.open
+ * @param url 要打开的 URL
+ */
+export async function openUrlInBrowser(url: string): Promise<void> {
+  try {
+    // 首先尝试使用 Tauri shell API（Tauri 2.x 推荐方式）
+    const tauriWindow = window as any
+    if (tauriWindow.__TAURI__?.shell?.open) {
+      try {
+        await tauriWindow.__TAURI__.shell.open(url)
+        return
+      } catch (err) {
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.warn('Tauri shell.open 失败，尝试后端命令:', err)
+        }
+      }
+    }
+    
+    // 如果 shell API 不可用，尝试使用后端命令
+    const invoker = getTauriInvoke()
+    if (invoker) {
+      try {
+        // open_url_in_browser 命令直接接受 url 参数（不是 params 包装）
+        await invoker('open_url_in_browser', { url })
+        return
+      } catch (err) {
+        // 如果命令失败，降级到 window.open
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.warn('通过后端打开浏览器失败，降级到 window.open:', err)
+        }
+      }
+    }
+    
+    // 降级到 window.open
+    const opened = window.open(url, '_blank', 'noopener,noreferrer')
+    if (!opened) {
+      throw new Error('浏览器阻止了弹窗')
+    }
+  } catch (err) {
+    // 最后的降级方案
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.error('打开浏览器失败:', err)
+    }
+    const opened = window.open(url, '_blank', 'noopener,noreferrer')
+    if (!opened) {
+      throw new Error('浏览器阻止了弹窗，请允许弹窗后重试')
+    }
+  }
+}
+

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import AiAssistantPanel from '../components/AiAssistantPanel.vue'
 import ContextMenu, { type MenuItem } from '../components/ContextMenu.vue'
@@ -10,7 +10,10 @@ import {
   categoriesData,
   syncCategoryConfigToData,
   type CategoryConfig,
+  type ToolItem,
 } from '../stores/categories'
+import { launchTool } from '../utils/toolLauncher'
+import { CATEGORY_ICON_MAP, DEFAULT_CATEGORY_ICON, SUBCATEGORY_ICON, DEFAULT_TOOL_ICON } from '../utils/constants'
 
 interface SearchItem {
   id: string
@@ -19,6 +22,10 @@ interface SearchItem {
   categoryId: string
   subCategoryId?: string
   description?: string
+  iconUrl?: string // 工具的图标 URL（仅工具类型有）
+  tool?: ToolItem // 完整的工具对象（仅工具类型有）
+  categoryIcon?: string // 分类的图标（仅分类类型有）
+  categoryColor?: string // 分类的颜色（仅分类类型有）
 }
 
 const router = useRouter()
@@ -27,6 +34,8 @@ const categoriesRef = categoriesConfig
 
 const query = ref('')
 const isAiOpen = ref(true)
+// 搜索结果的选中索引（用于键盘导航）
+const selectedSearchIndex = ref(-1)
 
 // AI 按钮拖拽位置
 const aiButtonPosition = ref({ x: window.innerWidth - 60, y: window.innerHeight - 200 })
@@ -46,46 +55,50 @@ const showDeveloperModal = ref(false)
 const searchItems = computed<SearchItem[]>(() => {
   const items: SearchItem[] = []
   
-  // 添加分类
-  categoriesRef.value
-    .filter((c) => c.enabled)
-    .forEach((c) => {
-      items.push({
-        id: c.id,
-        name: c.label || c.name,
-        type: 'category' as const,
-        categoryId: c.id,
-        description: c.description,
-      })
-      
-      // 查找对应的分类数据
-      const categoryData = categoriesData.value.find((d) => d.id === c.id)
-      if (categoryData) {
-        // 添加子分类
-        categoryData.subCategories.forEach((sub) => {
+      // 添加分类
+      categoriesRef.value
+        .filter((c) => c.enabled)
+        .forEach((c) => {
           items.push({
-            id: `${c.id}_${sub.id}`,
-            name: sub.name,
-            type: 'subcategory' as const,
+            id: c.id,
+            name: c.label || c.name,
+            type: 'category' as const,
             categoryId: c.id,
-            subCategoryId: sub.id,
-            description: sub.description,
+            description: c.description,
+            categoryIcon: c.icon,
+            categoryColor: c.color,
           })
           
-          // 添加工具
-          sub.tools.forEach((tool) => {
-            items.push({
-              id: `${c.id}_${sub.id}_${tool.id}`,
-              name: tool.name,
-              type: 'tool' as const,
-              categoryId: c.id,
-              subCategoryId: sub.id,
-              description: tool.description,
+          // 查找对应的分类数据
+          const categoryData = categoriesData.value.find((d) => d.id === c.id)
+          if (categoryData) {
+            // 添加子分类
+            categoryData.subCategories.forEach((sub) => {
+              items.push({
+                id: `${c.id}_${sub.id}`,
+                name: sub.name,
+                type: 'subcategory' as const,
+                categoryId: c.id,
+                subCategoryId: sub.id,
+                description: sub.description,
+              })
+              
+              // 添加工具
+              sub.tools.forEach((tool) => {
+                items.push({
+                  id: `${c.id}_${sub.id}_${tool.id}`,
+                  name: tool.name,
+                  type: 'tool' as const,
+                  categoryId: c.id,
+                  subCategoryId: sub.id,
+                  description: tool.description,
+                  iconUrl: tool.iconUrl,
+                  tool: tool, // 保存完整的工具对象
+                })
+              })
             })
-          })
+          }
         })
-      }
-    })
   
   return items
 })
@@ -114,7 +127,25 @@ const goToSettings = () => {
   router.push({ name: 'settings' })
 }
 
-const onResultClick = (item: SearchItem) => {
+// 获取分类图标的 emoji
+const getCategoryIcon = (iconName?: string): string => {
+  return CATEGORY_ICON_MAP[iconName || ''] || DEFAULT_CATEGORY_ICON
+}
+
+// 获取搜索结果的图标
+const getSearchItemIcon = (item: SearchItem): string => {
+  if (item.type === 'category') {
+    return getCategoryIcon(item.categoryIcon)
+  } else if (item.type === 'subcategory') {
+    return SUBCATEGORY_ICON
+  } else if (item.type === 'tool') {
+    // 工具类型返回空字符串，使用 img 标签显示
+    return ''
+  }
+  return DEFAULT_TOOL_ICON
+}
+
+const onResultClick = async (item: SearchItem) => {
   if (item.type === 'category') {
     router.push({ name: 'category', params: { id: item.categoryId } })
   } else if (item.type === 'subcategory' && item.subCategoryId) {
@@ -123,13 +154,114 @@ const onResultClick = (item: SearchItem) => {
       params: { id: item.categoryId },
       query: { sub: item.subCategoryId }
     })
-  } else if (item.type === 'tool' && item.subCategoryId) {
-    router.push({ 
-      name: 'category', 
-      params: { id: item.categoryId },
-      query: { sub: item.subCategoryId, tool: item.id.split('_').pop() }
-    })
+  } else if (item.type === 'tool' && item.tool) {
+    // 工具类型直接打开，不跳转
+    await openTool(item.tool)
   }
+  query.value = ''
+  selectedSearchIndex.value = -1
+}
+
+// 处理图标加载错误
+const handleIconError = (e: Event) => {
+  const img = e.target as HTMLImageElement
+  if (img) {
+    img.style.display = 'none'
+    // 显示默认图标
+    const parent = img.parentElement
+    if (parent) {
+      const fallback = document.createElement('span')
+      fallback.textContent = DEFAULT_TOOL_ICON
+      parent.appendChild(fallback)
+    }
+  }
+}
+
+// 打开工具（使用公共工具函数）
+const openTool = async (tool: ToolItem) => {
+  await launchTool(tool, showConfirm)
+}
+
+// 处理搜索输入框的键盘事件
+const handleSearchInputKeydown = (e: KeyboardEvent) => {
+  if (!query.value || filteredResults.value.length === 0) return
+  
+  if (e.key === 'ArrowDown') {
+    e.preventDefault()
+    selectedSearchIndex.value = Math.min(selectedSearchIndex.value + 1, filteredResults.value.length - 1)
+    scrollToSelectedItem()
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault()
+    selectedSearchIndex.value = Math.max(selectedSearchIndex.value - 1, -1)
+    scrollToSelectedItem()
+  } else if (e.key === 'Enter') {
+    e.preventDefault()
+    if (selectedSearchIndex.value >= 0 && selectedSearchIndex.value < filteredResults.value.length) {
+      const item = filteredResults.value[selectedSearchIndex.value]
+      if (item) {
+        onResultClick(item)
+      }
+    } else if (filteredResults.value.length > 0) {
+      // 如果没有选中项，打开第一个
+      const firstItem = filteredResults.value[0]
+      if (firstItem) {
+        onResultClick(firstItem)
+      }
+    }
+  } else if (e.key === 'Escape') {
+    query.value = ''
+    selectedSearchIndex.value = -1
+  }
+}
+
+// 处理搜索覆盖层的键盘事件
+const handleSearchKeydown = (e: KeyboardEvent) => {
+  if (!query.value || filteredResults.value.length === 0) return
+  
+  if (e.key === 'ArrowDown') {
+    e.preventDefault()
+    selectedSearchIndex.value = Math.min(selectedSearchIndex.value + 1, filteredResults.value.length - 1)
+    scrollToSelectedItem()
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault()
+    selectedSearchIndex.value = Math.max(selectedSearchIndex.value - 1, -1)
+    scrollToSelectedItem()
+  } else if (e.key === 'Enter') {
+    e.preventDefault()
+    if (selectedSearchIndex.value >= 0 && selectedSearchIndex.value < filteredResults.value.length) {
+      const item = filteredResults.value[selectedSearchIndex.value]
+      if (item) {
+        onResultClick(item)
+      }
+    }
+  } else if (e.key === 'Escape') {
+    query.value = ''
+    selectedSearchIndex.value = -1
+  }
+}
+
+// 处理搜索输入变化
+const handleSearchInput = () => {
+  // 搜索内容改变时重置选中索引
+  selectedSearchIndex.value = -1
+}
+
+// 滚动到选中的搜索结果项
+const scrollToSelectedItem = () => {
+  if (selectedSearchIndex.value < 0) return
+  
+  nextTick(() => {
+    const overlayList = document.querySelector('.overlay-list')
+    if (!overlayList) return
+    
+    const selectedItem = overlayList.children[selectedSearchIndex.value] as HTMLElement
+    if (selectedItem) {
+      selectedItem.scrollIntoView({
+        behavior: 'smooth',
+        block: 'nearest'
+      })
+    }
+  })
 }
 
 const toggleAi = () => {
@@ -448,24 +580,41 @@ const saveCategory = () => {
             v-model="query"
             class="search-input"
             type="search"
-            placeholder="搜索分类 / 二级分类 / 工具名称（规划中）..."
+            placeholder="搜索分类 / 二级分类 / 工具名称（↑↓ 选择，Enter 打开，Esc 清除）..."
+            @keydown="handleSearchInputKeydown"
+            @input="handleSearchInput"
           />
         </div>
       </div>
 
       <div v-if="isAiOpen" class="content-row ai-open" @contextmenu="showBlankMenu" :class="{ 'search-overlay-active': filteredResults.length }">
-        <div v-if="filteredResults.length" class="search-overlay">
-          <div class="overlay-title">搜索结果</div>
+        <div 
+          v-if="filteredResults.length" 
+          class="search-overlay"
+          @keydown="handleSearchKeydown"
+          tabindex="0"
+        >
+          <div class="overlay-title">搜索结果（{{ filteredResults.length }}）</div>
           <div class="overlay-list">
             <button
-              v-for="item in filteredResults"
+              v-for="(item, index) in filteredResults"
               :key="item.id"
               type="button"
               class="overlay-item"
+              :class="{ 'selected': selectedSearchIndex === index }"
               @click="onResultClick(item)"
+              @dblclick="onResultClick(item)"
+              @mouseenter="selectedSearchIndex = index"
             >
               <span class="overlay-icon">
-                {{ item.type === 'category' ? '📁' : item.type === 'subcategory' ? '📂' : '🛠️' }}
+                <img
+                  v-if="item.type === 'tool' && item.iconUrl"
+                  :src="item.iconUrl"
+                  :alt="item.name"
+                  class="overlay-icon-img"
+                  @error="handleIconError"
+                />
+                <span v-else>{{ getSearchItemIcon(item) }}</span>
               </span>
               <span class="overlay-text">
                 <span class="overlay-name">{{ item.name }}</span>
@@ -524,18 +673,33 @@ const saveCategory = () => {
       </div>
 
       <div v-else class="cards-row" @contextmenu="showBlankMenu" :class="{ 'search-overlay-active': filteredResults.length }">
-        <div v-if="filteredResults.length" class="search-overlay">
-          <div class="overlay-title">搜索结果</div>
+        <div 
+          v-if="filteredResults.length" 
+          class="search-overlay"
+          @keydown="handleSearchKeydown"
+          tabindex="0"
+        >
+          <div class="overlay-title">搜索结果（{{ filteredResults.length }}）</div>
           <div class="overlay-list">
             <button
-              v-for="item in filteredResults"
+              v-for="(item, index) in filteredResults"
               :key="item.id"
               type="button"
               class="overlay-item"
+              :class="{ 'selected': selectedSearchIndex === index }"
               @click="onResultClick(item)"
+              @dblclick="onResultClick(item)"
+              @mouseenter="selectedSearchIndex = index"
             >
               <span class="overlay-icon">
-                {{ item.type === 'category' ? '📁' : item.type === 'subcategory' ? '📂' : '🛠️' }}
+                <img
+                  v-if="item.type === 'tool' && item.iconUrl"
+                  :src="item.iconUrl"
+                  :alt="item.name"
+                  class="overlay-icon-img"
+                  @error="handleIconError"
+                />
+                <span v-else>{{ getSearchItemIcon(item) }}</span>
               </span>
               <span class="overlay-text">
                 <span class="overlay-name">{{ item.name }}</span>
@@ -966,9 +1130,16 @@ const saveCategory = () => {
   width: 100%;
 }
 
-.overlay-item:hover {
+.overlay-item:hover,
+.overlay-item.selected {
   border-color: rgba(77, 163, 255, 0.6);
   box-shadow: 0 10px 22px rgba(0, 0, 0, 0.65);
+  background: rgba(77, 163, 255, 0.1);
+}
+
+.overlay-item.selected {
+  border-color: rgba(77, 163, 255, 0.8);
+  background: rgba(77, 163, 255, 0.15);
 }
 
 .overlay-icon {
@@ -980,6 +1151,13 @@ const saveCategory = () => {
   font-size: 16px;
   flex-shrink: 0;
   /* 去掉背景，去掉小方块样式 */
+}
+
+.overlay-icon-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border-radius: 4px;
 }
 
 .overlay-text {

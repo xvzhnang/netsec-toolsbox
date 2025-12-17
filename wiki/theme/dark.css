@@ -1,0 +1,70 @@
+/* Wiki 深色主题示例 */
+
+/* 深色配色方案 */
+:root {
+  --wiki-primary-color: #58a6ff;
+  --wiki-bg-color: #0d1117;
+  --wiki-text-color: #c9d1d9;
+  --wiki-border-color: #30363d;
+  --wiki-sidebar-bg: #161b22;
+}
+
+body {
+  background-color: var(--wiki-bg-color);
+  color: var(--wiki-text-color);
+}
+
+.wiki-sidebar {
+  background-color: var(--wiki-sidebar-bg);
+  border-right-color: var(--wiki-border-color);
+}
+
+.wiki-sidebar-header h2 {
+  color: var(--wiki-text-color);
+}
+
+.wiki-file-tree a,
+.wiki-toc a {
+  color: var(--wiki-primary-color);
+}
+
+.wiki-file-tree a:hover,
+.wiki-toc a:hover {
+  background-color: #21262d;
+}
+
+.markdown-body {
+  color: var(--wiki-text-color);
+}
+
+.markdown-body h1,
+.markdown-body h2 {
+  border-bottom-color: var(--wiki-border-color);
+}
+
+.markdown-body code {
+  background-color: rgba(110, 118, 129, 0.4);
+}
+
+.markdown-body pre {
+  background-color: #161b22;
+}
+
+.markdown-body table th,
+.markdown-body table td {
+  border-color: var(--wiki-border-color);
+}
+
+.markdown-body table th {
+  background-color: #161b22;
+}
+
+.markdown-body blockquote {
+  color: #8b949e;
+  border-left-color: var(--wiki-border-color);
+}
+
+.markdown-body a {
+  color: var(--wiki-primary-color);
+}
+

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ContextMenu, { type MenuItem } from '../components/ContextMenu.vue'
 import ModalDialog from '../components/ModalDialog.vue'
@@ -14,8 +14,10 @@ import {
   type ToolType,
 } from '../stores/categories'
 import { openFileDialog } from '../utils/fileDialog'
-import { selectImageFile, processImage, extractIconFromExecutable, autoFetchIcon, detectFileTypeFromPath } from '../utils/imageProcessor'
-import { getTauriInvoke, waitForTauriAPI, isTauriEnvironment } from '../utils/tauri'
+import { selectImageFile, processImage, autoFetchIcon, detectFileTypeFromPath } from '../utils/imageProcessor'
+import { getTauriInvoke } from '../utils/tauri'
+import { launchTool } from '../utils/toolLauncher'
+import { debug, error as logError } from '../utils/logger'
 
 const route = useRoute()
 const router = useRouter()
@@ -43,6 +45,8 @@ const selectedSubId = ref<string | null>(null)
 const searchQuery = ref('')
 // 视图模式：'grid' 网格视图，'list' 列表视图
 const viewMode = ref<'grid' | 'list'>('grid')
+// 搜索结果的选中索引（用于键盘导航）
+const selectedSearchIndex = ref(-1)
 
 // 组件挂载时重置状态
 watch(
@@ -103,8 +107,15 @@ const autoFetchToolIcons = async () => {
   // 触发响应式更新
   if (category.value) {
     const categoryIndex = categoriesData.value.findIndex(c => c.id === category.value?.id)
-    if (categoryIndex >= 0) {
-      categoriesData.value[categoryIndex] = { ...categoriesData.value[categoryIndex] }
+    if (categoryIndex >= 0 && categoriesData.value[categoryIndex]) {
+      const existing = categoriesData.value[categoryIndex]
+      categoriesData.value[categoryIndex] = {
+        id: existing.id,
+        name: existing.name,
+        label: existing.label,
+        description: existing.description,
+        subCategories: existing.subCategories,
+      }
     }
   }
 }
@@ -159,16 +170,6 @@ const goBack = () => {
   router.back()
 }
 
-// Tauri API 类型声明（保留用于其他用途）
-interface TauriWindow extends Window {
-  __TAURI__?: {
-    invoke?: <T = unknown>(cmd: string, args?: Record<string, unknown>) => Promise<T>
-    core?: {
-      invoke?: <T = unknown>(cmd: string, args?: Record<string, unknown>) => Promise<T>
-    }
-  }
-}
-
 /**
  * 打开工具
  * 从 JSON 配置文件中读取的工具信息（通过 categoriesData → category → currentSub → tools）
@@ -179,232 +180,96 @@ const openTool = async (toolId: string) => {
   // tools.value 来自: categoriesData (JSON) → category → currentSub → tools
   const tool = tools.value.find((t) => t.id === toolId)
   if (!tool) {
-    if (import.meta.env.DEV) {
-      // eslint-disable-next-line no-console
-      console.error('工具未找到:', toolId, '可用工具:', tools.value.map(t => t.id))
-    }
+    logError('工具未找到:', toolId, '可用工具:', tools.value.map(t => t.id))
     return
   }
   
-  // 从 JSON 配置文件中读取的工具类型（如果未设置则默认为 GUI）
-  const toolType = tool.toolType || 'GUI'
+  debug('打开工具（从 JSON 配置文件读取）:', {
+    toolId,
+    toolName: tool.name,
+    toolType: tool.toolType,
+    execPath: tool.execPath,
+    args: tool.args,
+    workingDir: tool.workingDir,
+    jarConfig: tool.jarConfig,
+  })
   
-  // 调试信息：显示从 JSON 配置文件中读取的完整工具信息
-  if (import.meta.env.DEV) {
-    // eslint-disable-next-line no-console
-    console.log('打开工具（从 JSON 配置文件读取）:', {
-      toolId,
-      toolName: tool.name,
-      toolType,
-      toolTypeRaw: tool.toolType,
-      execPath: tool.execPath, // 从 JSON 读取的执行路径
-      args: tool.args, // 从 JSON 读取的参数
-      workingDir: tool.workingDir, // 从 JSON 读取的工作目录
-      jarConfig: tool.jarConfig, // 从 JSON 读取的 JAR 配置
-      fullTool: JSON.parse(JSON.stringify(tool)), // 完整工具对象（来自 JSON）
-    })
-  }
-  
-  // 所有类型都通过后端处理，包括网页类型（避免浏览器弹窗拦截）
-  try {
-    // 先尝试获取，如果失败则等待 API 加载
-    let invoker = getTauriInvoke()
-    
-    if (!invoker) {
-      // 等待 Tauri API 加载（最多等待 5 秒，因为 Tauri 2.x 可能需要更长时间）
-      const apiLoaded = await waitForTauriAPI(5000)
-      if (apiLoaded) {
-        invoker = getTauriInvoke()
-      }
-    }
-    
-    if (!invoker) {
-      // 检查是否在 Tauri 环境中
-      const isTauri = isTauriEnvironment()
-      
-      if (import.meta.env.DEV) {
-        // eslint-disable-next-line no-console
-        console.error('Tauri API 不可用', {
-          isTauri,
-          userAgent: navigator.userAgent,
-          location: window.location.href,
-        })
-      }
-      
-      // 如果不在 Tauri 环境中，对于网页工具可以降级到 window.open
-      if (toolType === '网页' && !isTauri) {
-        const url = tool.execPath
-        if (url) {
-          try {
-            new URL(url)
-            const opened = window.open(url, '_blank', 'noopener,noreferrer')
-            if (!opened) {
-              showConfirm('提示', '浏览器阻止了弹窗，请允许弹窗后重试', () => {}, 'warning')
-            }
-            // 启动成功，不显示提示，简化操作
-            return
-          } catch {
-            showConfirm('提示', 'URL 地址格式无效', () => {}, 'warning')
-            return
-          }
-        }
-      }
-      
-      if (isTauri) {
-        showConfirm('错误', 'Tauri API 加载失败，请刷新页面重试。如果问题持续，请检查 Tauri 配置。', () => {}, 'warning')
-      } else {
-        showConfirm('错误', '无法连接到后端服务。请确保在 Tauri 桌面应用中运行（使用 `npm run tauri dev` 启动），而不是直接在浏览器中打开。', () => {}, 'warning')
-      }
-      return
-    }
-    
-    // 调试：检查工具数据
-    if (import.meta.env.DEV) {
-      // eslint-disable-next-line no-console
-      console.log('工具数据检查:', {
-        toolId: tool.id,
-        toolName: tool.name,
-        toolType: tool.toolType,
-        execPath: tool.execPath,
-        execPathType: typeof tool.execPath,
-        hasExecPath: !!tool.execPath,
-        workingDir: tool.workingDir,
-        jarConfig: tool.jarConfig,
-      })
-    }
-    
-    // 根据工具类型准备参数
-    let execPath: string | undefined
-    let workingDir: string | undefined
-    let jarConfig: ToolItem['jarConfig'] | undefined
-    
-    if (toolType === 'JAR' && tool.jarConfig) {
-      // JAR 类型使用 jarConfig
-      jarConfig = tool.jarConfig
-    } else if (toolType === 'Python' || toolType === 'CLI') {
-      // Python 和 CLI 工具使用 execPath
-      execPath = tool.execPath
-      if (!execPath) {
-        showConfirm('提示', '工具路径未配置', () => {}, 'warning')
-        return
-      }
-    } else if (toolType === 'HTML' || toolType === 'LNK') {
-      // HTML 和 LNK 工具只需要 execPath
-      execPath = tool.execPath
-      if (!execPath) {
-        showConfirm('提示', '文件路径未配置', () => {}, 'warning')
-        return
-      }
-    } else if (toolType === '网页') {
-      // 网页类型使用 execPath（URL 地址）
-      execPath = tool.execPath
-      if (!execPath) {
-        showConfirm('提示', 'URL 地址未配置', () => {}, 'warning')
-        return
-      }
-      // 验证 URL 格式
-      try {
-        new URL(execPath)
-      } catch {
-        showConfirm('提示', 'URL 地址格式无效（必须以 http:// 或 https:// 开头）', () => {}, 'warning')
-        return
-      }
-    } else {
-      // GUI 等其他类型直接使用 execPath 和 workingDir
-      execPath = tool.execPath
-      workingDir = tool.workingDir
-      if (!execPath) {
-        showConfirm('提示', '工具路径未配置', () => {}, 'warning')
-        return
-      }
-    }
-    
-    // 调用后端启动工具
-    // 调试信息
-    if (import.meta.env.DEV) {
-      // eslint-disable-next-line no-console
-      console.log('调用后端启动工具:', {
-        tool_type: toolType,
-        tool_type_type: typeof toolType,
-        exec_path: execPath,
-        exec_path_type: typeof execPath,
-        has_args: !!tool.args,
-        working_dir: workingDir,
-        has_jar_config: !!jarConfig,
-      })
-    }
-    
-    // 确保 tool_type 是字符串类型，并确保值正确
-    // 注意：使用 tool.toolType 而不是 toolType，因为 toolType 可能是默认值 'GUI'
-    // 如果 tool.toolType 是 null 或 undefined，使用默认值 'GUI'
-    const actualToolType = (tool.toolType && tool.toolType !== 'null' && tool.toolType !== 'undefined') 
-      ? tool.toolType 
-      : (toolType || 'GUI')
-    const toolTypeStr = String(actualToolType).trim()
-    
-    // 验证 tool_type 值
-    if (!toolTypeStr || toolTypeStr === 'undefined' || toolTypeStr === 'null') {
-      showConfirm('错误', `工具类型无效: ${toolType} (实际: ${actualToolType})`, () => {}, 'warning')
-      return
-    }
-    
-    if (import.meta.env.DEV) {
-      // eslint-disable-next-line no-console
-      console.log('工具类型处理:', {
-        originalToolType: toolType,
-        toolToolType: tool.toolType,
-        actualToolType,
-        toolTypeStr,
-      })
-    }
-    
-    // 构建调用参数（所有信息都来自 JSON 配置文件）
-    // 注意：后端使用结构体接收参数，支持 camelCase 和 snake_case 两种命名方式
-    // 只传递非 undefined 的值，避免后端接收到 None
-    const invokeParams: Record<string, unknown> = {
-      tool_type: toolTypeStr, // 使用 snake_case（也支持 toolType）
-    }
-    
-    // 只添加非 undefined 的参数，使用 snake_case（后端会自动匹配）
-    if (execPath !== undefined && execPath !== null && execPath !== '') {
-      invokeParams.exec_path = execPath // 也支持 execPath
-    }
-    if (tool.args !== undefined && tool.args !== null && tool.args.length > 0) {
-      invokeParams.args = tool.args
-    }
-    if (workingDir !== undefined && workingDir !== null && workingDir !== '') {
-      invokeParams.working_dir = workingDir // 也支持 workingDir
-    }
-    
-    // JAR 配置（从 JSON 读取的 jar_config），使用 snake_case（后端会自动匹配）
-    if (jarConfig) {
-      invokeParams.jar_config = {
-        jar_path: jarConfig.jarPath, // 也支持 jarPath
-        java_path: jarConfig.javaPath || null, // 也支持 javaPath，确保 null 而不是 undefined
-        jvm_args: jarConfig.jvmArgs || null, // 也支持 jvmArgs
-        program_args: jarConfig.programArgs || null, // 也支持 programArgs
-      }
-    }
-    
-    if (import.meta.env.DEV) {
-      // eslint-disable-next-line no-console
-      console.log('调用后端启动工具（参数来自 JSON 配置文件）:', invokeParams)
-    }
-    
-    // 调用后端启动工具，传递从 JSON 配置文件中读取的所有信息
-    // 注意：Tauri 2.x 使用结构体参数时，需要将参数对象包装在结构体字段名中
-    await invoker('launch_tool', { params: invokeParams })
-    
-    // 启动成功，不显示提示，简化操作
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error)
-    showConfirm('错误', `启动工具失败：${errorMessage}`, () => {}, 'warning')
-  }
+  // 使用公共的工具启动函数
+  await launchTool(tool, showConfirm)
 }
 
-const openWiki = (wikiUrl?: string) => {
-  if (!wikiUrl) return
-  window.open(wikiUrl, '_blank')
+const openWiki = async (wikiUrl?: string, toolId?: string, toolName?: string) => {
+  const invoker = getTauriInvoke()
+  
+  try {
+    // 确保 Wiki 服务器已启动
+    if (invoker) {
+      try {
+        await invoker('start_wiki_server')
+      } catch (err) {
+        // 服务器可能已经在运行，忽略错误
+      }
+    }
+    
+    let finalUrl = wikiUrl
+    
+    // 如果没有提供 wikiUrl，尝试根据工具 ID 或名称自动查找
+    if (!finalUrl && invoker && (toolId || toolName)) {
+      try {
+        const found = await invoker<{ path: string } | null>('find_wiki_for_tool', {
+          params: {
+            toolId: toolId || '',
+            toolName: toolName || undefined,
+          }
+        })
+        if (found && found.path) {
+          finalUrl = `http://127.0.0.1:8777/file/${found.path}`
+        } else {
+          // 如果没找到，打开 Wiki 首页
+          finalUrl = 'http://127.0.0.1:8777'
+        }
+      } catch (err) {
+        logError('查找 Wiki 文件失败:', err)
+        // 失败时打开 Wiki 首页
+        finalUrl = 'http://127.0.0.1:8777'
+      }
+    } else if (!finalUrl) {
+      // 如果都没有，打开 Wiki 首页
+      finalUrl = 'http://127.0.0.1:8777'
+    }
+    
+    // 如果是相对路径，转换为完整 URL
+    if (finalUrl && !finalUrl.startsWith('http')) {
+      if (finalUrl.startsWith('/')) {
+        finalUrl = `http://127.0.0.1:8777/file${finalUrl}`
+      } else {
+        finalUrl = `http://127.0.0.1:8777/file/${finalUrl}`
+      }
+    }
+    
+    // 添加保存的主题参数（如果有）
+    if (finalUrl) {
+      const savedTheme = localStorage.getItem('wiki-theme')
+      if (savedTheme && savedTheme !== 'default') {
+        const urlObj = new URL(finalUrl)
+        urlObj.searchParams.set('theme', savedTheme)
+        finalUrl = urlObj.toString()
+      }
+      
+      // 使用 Tauri shell.open API 打开浏览器
+      const { openUrlInBrowser } = await import('../utils/tauri')
+      await openUrlInBrowser(finalUrl)
+    }
+  } catch (err) {
+    logError('打开 Wiki 失败:', err)
+    // 降级到 window.open
+    if (wikiUrl) {
+      const opened = window.open(wikiUrl, '_blank', 'noopener,noreferrer')
+      if (!opened) {
+        logError('浏览器阻止了弹窗')
+      }
+    }
+  }
 }
 
 const goSettings = () => {
@@ -414,45 +279,35 @@ const goSettings = () => {
 const openWikiHome = async () => {
   try {
     const invoker = getTauriInvoke()
+    
+    // 尝试启动 Wiki 服务器（如果后端支持）
     if (invoker) {
-      // 尝试启动 Wiki 服务器（如果后端支持）
       try {
         await invoker('start_wiki_server')
       } catch {
         // 静默处理错误，允许继续打开浏览器
       }
-      // 通过后端打开浏览器，避免弹窗拦截
-      try {
-        await invoker('launch_tool', {
-          tool_type: '网页',
-          exec_path: 'http://127.0.0.1:8777',
-        })
-      } catch (error) {
-        // 如果后端打开失败，降级到 window.open
-        const errorMessage = error instanceof Error ? error.message : String(error)
-        if (import.meta.env.DEV) {
-          // eslint-disable-next-line no-console
-          console.warn('通过后端打开浏览器失败，降级到 window.open:', errorMessage)
-        }
-        const opened = window.open('http://127.0.0.1:8777', '_blank')
-        if (!opened) {
-          showConfirm('提示', '浏览器阻止了弹窗，请允许弹窗后重试', () => {}, 'warning')
-        }
-      }
-    } else {
-      // 如果没有 Tauri API，降级到 window.open
-      const opened = window.open('http://127.0.0.1:8777', '_blank')
-      if (!opened) {
-        showConfirm('提示', '浏览器阻止了弹窗，请允许弹窗后重试', () => {}, 'warning')
-      }
     }
+    
+    // 构建 URL，添加保存的主题参数（如果有）
+    let url = 'http://127.0.0.1:8777'
+    const savedTheme = localStorage.getItem('wiki-theme')
+    if (savedTheme && savedTheme !== 'default') {
+      const urlObj = new URL(url)
+      urlObj.searchParams.set('theme', savedTheme)
+      url = urlObj.toString()
+    }
+    
+    // 使用 Tauri shell.open API 打开浏览器
+    const { openUrlInBrowser } = await import('../utils/tauri')
+    await openUrlInBrowser(url)
   } catch (err) {
     if (import.meta.env.DEV) {
       // eslint-disable-next-line no-console
-      console.error('open wiki failed', err)
+      console.error('打开 Wiki 失败:', err)
     }
-    // 即使启动服务失败，也尝试打开浏览器
-    const opened = window.open('http://127.0.0.1:8777', '_blank')
+    // 降级到 window.open
+    const opened = window.open('http://127.0.0.1:8777', '_blank', 'noopener,noreferrer')
     if (!opened) {
       showConfirm('提示', '浏览器阻止了弹窗，请允许弹窗后重试', () => {}, 'warning')
     }
@@ -462,6 +317,91 @@ const openWikiHome = async () => {
 const onOverlayClick = (toolId: string) => {
   openTool(toolId)
   searchQuery.value = ''
+  selectedSearchIndex.value = -1
+}
+
+// 处理搜索输入框的键盘事件
+const handleSearchInputKeydown = (e: KeyboardEvent) => {
+  if (!searchQuery.value || filteredTools.value.length === 0) return
+  
+  if (e.key === 'ArrowDown') {
+    e.preventDefault()
+    selectedSearchIndex.value = Math.min(selectedSearchIndex.value + 1, filteredTools.value.length - 1)
+    // 滚动到选中项
+    scrollToSelectedItem()
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault()
+    selectedSearchIndex.value = Math.max(selectedSearchIndex.value - 1, -1)
+    // 滚动到选中项
+    scrollToSelectedItem()
+  } else if (e.key === 'Enter') {
+    e.preventDefault()
+    if (selectedSearchIndex.value >= 0 && selectedSearchIndex.value < filteredTools.value.length) {
+      const tool = filteredTools.value[selectedSearchIndex.value]
+      if (tool) {
+        onOverlayClick(tool.id)
+      }
+    } else if (filteredTools.value.length > 0) {
+      // 如果没有选中项，打开第一个
+      const firstTool = filteredTools.value[0]
+      if (firstTool) {
+        onOverlayClick(firstTool.id)
+      }
+    }
+  } else if (e.key === 'Escape') {
+    searchQuery.value = ''
+    selectedSearchIndex.value = -1
+  }
+}
+
+// 处理搜索覆盖层的键盘事件
+const handleSearchKeydown = (e: KeyboardEvent) => {
+  if (!searchQuery.value || filteredTools.value.length === 0) return
+  
+  if (e.key === 'ArrowDown') {
+    e.preventDefault()
+    selectedSearchIndex.value = Math.min(selectedSearchIndex.value + 1, filteredTools.value.length - 1)
+    scrollToSelectedItem()
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault()
+    selectedSearchIndex.value = Math.max(selectedSearchIndex.value - 1, -1)
+    scrollToSelectedItem()
+  } else if (e.key === 'Enter') {
+    e.preventDefault()
+    if (selectedSearchIndex.value >= 0 && selectedSearchIndex.value < filteredTools.value.length) {
+      const tool = filteredTools.value[selectedSearchIndex.value]
+      if (tool) {
+        onOverlayClick(tool.id)
+      }
+    }
+  } else if (e.key === 'Escape') {
+    searchQuery.value = ''
+    selectedSearchIndex.value = -1
+  }
+}
+
+// 处理搜索输入变化
+const handleSearchInput = () => {
+  // 搜索内容改变时重置选中索引
+  selectedSearchIndex.value = -1
+}
+
+// 滚动到选中的搜索结果项
+const scrollToSelectedItem = () => {
+  if (selectedSearchIndex.value < 0) return
+  
+  nextTick(() => {
+    const overlayList = document.querySelector('.overlay-list')
+    if (!overlayList) return
+    
+    const selectedItem = overlayList.children[selectedSearchIndex.value] as HTMLElement
+    if (selectedItem) {
+      selectedItem.scrollIntoView({
+        behavior: 'smooth',
+        block: 'nearest'
+      })
+    }
+  })
 }
 
 const subForm = ref<{ id: string; name: string; description: string }>({
@@ -524,9 +464,16 @@ const saveSub = () => {
   // 确保修改被 Vue 响应式系统检测到
   if (category.value) {
     const categoryIndex = categoriesData.value.findIndex(c => c.id === category.value?.id)
-    if (categoryIndex >= 0) {
+    if (categoryIndex >= 0 && categoriesData.value[categoryIndex]) {
       // 创建一个新对象来触发响应式更新
-      categoriesData.value[categoryIndex] = { ...categoriesData.value[categoryIndex] }
+      const existing = categoriesData.value[categoryIndex]
+      categoriesData.value[categoryIndex] = {
+        id: existing.id,
+        name: existing.name,
+        label: existing.label,
+        description: existing.description,
+        subCategories: existing.subCategories,
+      }
     }
   }
   
@@ -547,9 +494,16 @@ const deleteSub = (id: string) => {
     }
     // 确保修改被 Vue 响应式系统检测到
     const categoryIndex = categoriesData.value.findIndex(c => c.id === category.value?.id)
-    if (categoryIndex >= 0) {
+    if (categoryIndex >= 0 && categoriesData.value[categoryIndex]) {
       // 创建一个新对象来触发响应式更新
-      categoriesData.value[categoryIndex] = { ...categoriesData.value[categoryIndex] }
+      const existing = categoriesData.value[categoryIndex]
+      categoriesData.value[categoryIndex] = {
+        id: existing.id,
+        name: existing.name,
+        label: existing.label,
+        description: existing.description,
+        subCategories: existing.subCategories,
+      }
     }
   }
 }
@@ -757,9 +711,16 @@ const saveTool = async () => {
   if (category.value) {
     // 强制触发响应式更新
     const categoryIndex = categoriesData.value.findIndex(c => c.id === category.value?.id)
-    if (categoryIndex >= 0) {
+    if (categoryIndex >= 0 && categoriesData.value[categoryIndex]) {
       // 创建一个新对象来触发响应式更新
-      categoriesData.value[categoryIndex] = { ...categoriesData.value[categoryIndex] }
+      const existing = categoriesData.value[categoryIndex]
+      categoriesData.value[categoryIndex] = {
+        id: existing.id,
+        name: existing.name,
+        label: existing.label,
+        description: existing.description,
+        subCategories: existing.subCategories,
+      }
     }
   }
   
@@ -780,9 +741,16 @@ const deleteTool = (id: string) => {
     // 确保修改被 Vue 响应式系统检测到
     if (category.value) {
       const categoryIndex = categoriesData.value.findIndex(c => c.id === category.value?.id)
-      if (categoryIndex >= 0) {
+      if (categoryIndex >= 0 && categoriesData.value[categoryIndex]) {
         // 创建一个新对象来触发响应式更新
-        categoriesData.value[categoryIndex] = { ...categoriesData.value[categoryIndex] }
+        const existing = categoriesData.value[categoryIndex]
+        categoriesData.value[categoryIndex] = {
+          id: existing.id,
+          name: existing.name,
+          label: existing.label,
+          description: existing.description,
+          subCategories: existing.subCategories,
+        }
       }
     }
   }
@@ -802,7 +770,7 @@ const selectJarFile = async () => {
       try {
         const invoker = getTauriInvoke()
         if (invoker) {
-          const resolved = await invoker<string>('resolve_file_path', {
+          const resolved = await invoker('resolve_file_path', {
             params: {
               filePath: filePath,
             }
@@ -841,7 +809,7 @@ const selectHtmlFile = async () => {
       try {
         const invoker = getTauriInvoke()
         if (invoker) {
-          const resolved = await invoker<string>('resolve_file_path', {
+          const resolved = await invoker('resolve_file_path', {
             params: {
               filePath: filePath,
             }
@@ -1080,7 +1048,7 @@ const selectExecutableFile = async () => {
       try {
         const invoker = getTauriInvoke()
         if (invoker) {
-          const resolved = await invoker<string>('resolve_file_path', {
+          const resolved = await invoker('resolve_file_path', {
             params: {
               filePath: filePath,
             }
@@ -1208,15 +1176,11 @@ const toolMenuItems = computed<MenuItem[]>(() => {
       icon: '▶️',
       action: () => openTool(tool.id),
     },
-    ...(tool.wikiUrl
-      ? [
-          {
-            label: '在 Wiki 中查看',
-            icon: '📚',
-            action: () => openWiki(tool.wikiUrl),
-          },
-        ]
-      : []),
+    {
+      label: '在 Wiki 中查看',
+      icon: '📚',
+      action: () => openWiki(tool.wikiUrl, tool.id, tool.name),
+    },
     {
       label: '删除工具',
       icon: '🗑️',
@@ -1369,7 +1333,9 @@ const onConfirm = () => {
             v-model="searchQuery"
             class="search-input"
             type="search"
-            placeholder="搜索当前子分类的工具名称或描述"
+            placeholder="搜索当前子分类的工具名称或描述（↑↓ 选择，Enter 打开，Esc 清除）"
+            @keydown="handleSearchInputKeydown"
+            @input="handleSearchInput"
           />
         </div>
       </div>
@@ -1464,15 +1430,20 @@ const onConfirm = () => {
           <div
             v-if="searchQuery && filteredTools.length"
             class="search-overlay"
+            @keydown="handleSearchKeydown"
+            tabindex="0"
           >
-            <div class="overlay-title">搜索结果</div>
+            <div class="overlay-title">搜索结果（{{ filteredTools.length }}）</div>
             <div class="overlay-list">
               <button
-                v-for="tool in filteredTools"
+                v-for="(tool, index) in filteredTools"
                 :key="tool.id"
                 type="button"
                 class="overlay-item"
+                :class="{ 'selected': selectedSearchIndex === index }"
                 @click="onOverlayClick(tool.id)"
+                @dblclick="onOverlayClick(tool.id)"
+                @mouseenter="selectedSearchIndex = index"
               >
                 <span class="overlay-icon">🛠️</span>
                 <span class="overlay-text">
@@ -1531,7 +1502,7 @@ const onConfirm = () => {
                       <div class="tool-name">{{ (tool as ToolItem).name }}</div>
                       <p v-if="(tool as ToolItem).description" class="tool-desc">{{ (tool as ToolItem).description }}</p>
                       <div class="tool-actions">
-                        <button type="button" class="btn ghost small" @click="openWiki((tool as ToolItem).wikiUrl)">📚 Wiki</button>
+                        <button type="button" class="btn ghost small" @click="openWiki((tool as ToolItem).wikiUrl, (tool as ToolItem).id, (tool as ToolItem).name)">📚 Wiki</button>
                         <button type="button" class="btn primary small" @click="openTool((tool as ToolItem).id)">打开</button>
                       </div>
                     </div>
@@ -1559,7 +1530,7 @@ const onConfirm = () => {
                     <div class="tool-name">{{ tool.name }}</div>
                     <p v-if="tool.description" class="tool-desc">{{ tool.description }}</p>
                     <div class="tool-actions">
-                      <button type="button" class="btn ghost small" @click="openWiki(tool.wikiUrl)">📚 Wiki</button>
+                      <button type="button" class="btn ghost small" @click="openWiki(tool.wikiUrl, tool.id, tool.name)">📚 Wiki</button>
                       <button type="button" class="btn primary small" @click="openTool(tool.id)">打开</button>
                     </div>
                   </div>
@@ -1596,7 +1567,7 @@ const onConfirm = () => {
                       <p v-if="(tool as ToolItem).description" class="tool-desc-list">{{ (tool as ToolItem).description }}</p>
                     </div>
                     <div class="tool-actions-list">
-                      <button type="button" class="btn ghost small" @click="openWiki((tool as ToolItem).wikiUrl)">📚 Wiki</button>
+                      <button type="button" class="btn ghost small" @click="openWiki((tool as ToolItem).wikiUrl, (tool as ToolItem).id, (tool as ToolItem).name)">📚 Wiki</button>
                       <button type="button" class="btn primary small" @click="openTool((tool as ToolItem).id)">打开</button>
                     </div>
                   </div>
@@ -1624,7 +1595,7 @@ const onConfirm = () => {
                     <p v-if="tool.description" class="tool-desc-list">{{ tool.description }}</p>
                   </div>
                   <div class="tool-actions-list">
-                    <button type="button" class="btn ghost small" @click="openWiki(tool.wikiUrl)">📚 Wiki</button>
+                    <button type="button" class="btn ghost small" @click="openWiki(tool.wikiUrl, tool.id, tool.name)">📚 Wiki</button>
                     <button type="button" class="btn primary small" @click="openTool(tool.id)">打开</button>
                   </div>
                 </div>
@@ -1661,7 +1632,7 @@ const onConfirm = () => {
                       <p v-if="(tool as ToolItem).description" class="tool-desc-list">{{ (tool as ToolItem).description }}</p>
                     </div>
                     <div class="tool-actions-list">
-                      <button type="button" class="btn ghost small" @click="openWiki((tool as ToolItem).wikiUrl)">📚 Wiki</button>
+                      <button type="button" class="btn ghost small" @click="openWiki((tool as ToolItem).wikiUrl, (tool as ToolItem).id, (tool as ToolItem).name)">📚 Wiki</button>
                       <button type="button" class="btn primary small" @click="openTool((tool as ToolItem).id)">打开</button>
                     </div>
                   </div>
@@ -1689,7 +1660,7 @@ const onConfirm = () => {
                     <p v-if="tool.description" class="tool-desc-list">{{ tool.description }}</p>
                   </div>
                   <div class="tool-actions-list">
-                    <button type="button" class="btn ghost small" @click="openWiki(tool.wikiUrl)">📚 Wiki</button>
+                    <button type="button" class="btn ghost small" @click="openWiki(tool.wikiUrl, tool.id, tool.name)">📚 Wiki</button>
                     <button type="button" class="btn primary small" @click="openTool(tool.id)">打开</button>
                   </div>
                 </div>
@@ -2716,9 +2687,16 @@ const onConfirm = () => {
   transition: all 0.16s ease-out;
 }
 
-.overlay-item:hover {
+.overlay-item:hover,
+.overlay-item.selected {
   border-color: rgba(77, 163, 255, 0.6);
   box-shadow: 0 10px 22px rgba(0, 0, 0, 0.65);
+  background: rgba(77, 163, 255, 0.1);
+}
+
+.overlay-item.selected {
+  border-color: rgba(77, 163, 255, 0.8);
+  background: rgba(77, 163, 255, 0.15);
 }
 
 .overlay-icon {

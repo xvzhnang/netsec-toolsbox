@@ -239,7 +239,8 @@ fn launch_lnk_tool(_exec_path: &str) -> Result<(), String> {
 }
 
 /// 打开 URL 在默认浏览器中（用于网页工具）
-fn open_url_in_browser(url: &str) -> Result<(), String> {
+#[tauri::command]
+pub fn open_url_in_browser(url: String) -> Result<(), String> {
   // 验证 URL 格式
   if !url.starts_with("http://") && !url.starts_with("https://") {
     return Err(format!("无效的 URL 格式: {}", url));
@@ -250,7 +251,7 @@ fn open_url_in_browser(url: &str) -> Result<(), String> {
   {
     // Windows: 使用 start 命令打开默认浏览器
     Command::new("cmd")
-      .args(&["/C", "start", "", url])
+      .args(&["/C", "start", "", url.as_str()])
       .spawn()
       .map_err(|e| format!("打开浏览器失败: {}", e))?;
   }
@@ -259,7 +260,7 @@ fn open_url_in_browser(url: &str) -> Result<(), String> {
   {
     // macOS: 使用 open 命令
     Command::new("open")
-      .arg(url)
+      .arg(url.as_str())
       .spawn()
       .map_err(|e| format!("打开浏览器失败: {}", e))?;
   }
@@ -388,7 +389,7 @@ pub fn launch_tool(params: LaunchToolParams) -> Result<(), String> {
     }
     "网页" => {
       let exec_path = exec_path.ok_or("网页工具需要 URL 地址")?;
-      open_url_in_browser(&exec_path)
+      open_url_in_browser(exec_path)
     }
     _ => Err(format!("不支持的工具类型: {}", tool_type)),
   }
