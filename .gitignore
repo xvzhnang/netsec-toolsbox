@@ -12,6 +12,10 @@ dist
 dist-ssr
 *.local
 
+# User configuration directories (generated at runtime)
+.config/
+wiki/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

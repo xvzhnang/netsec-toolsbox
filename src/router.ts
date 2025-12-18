@@ -3,6 +3,7 @@ import type { RouteRecordRaw } from 'vue-router'
 import DashboardView from './views/DashboardView.vue'
 import SettingsView from './views/SettingsView.vue'
 import CategoryView from './views/CategoryView.vue'
+import WikiView from './views/WikiView.vue'
 
 const routes: RouteRecordRaw[] = [
   {
@@ -28,6 +29,19 @@ const routes: RouteRecordRaw[] = [
     meta: {
       transition: 'fade',
     },
+  },
+  {
+    path: '/wiki',
+    name: 'wiki',
+    component: WikiView,
+    meta: {
+      transition: 'fade',
+    },
+    props: (route) => ({
+      filePath: route.query.filePath as string | undefined,
+      toolId: route.query.toolId as string | undefined,
+      toolName: route.query.toolName as string | undefined,
+    }),
   },
 ]
 

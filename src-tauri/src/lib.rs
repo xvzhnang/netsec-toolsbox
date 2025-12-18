@@ -44,26 +44,24 @@ pub fn run() {
       write_config_file,
       get_config_file_path,
       config_file_exists,
+      read_icon_file,
       // 工具启动
       launch_tool,
       open_url_in_browser,
       // 图标提取
       extract_icon_from_file,
       fetch_favicon,
+      save_icon_to_cache,
       // 文件操作
       upload_file,
       resolve_file_path,
       open_file_dialog,
       // Wiki 功能
-      wiki_commands::start_wiki_server,
-      wiki_commands::stop_wiki_server,
-      wiki_commands::get_wiki_files,
-      wiki_commands::render_wiki_file,
-      wiki_commands::search_wiki,
-      wiki_commands::get_wiki_dir,
-      wiki_commands::find_wiki_for_tool,
-      wiki_commands::get_wiki_themes,
-      wiki_commands::set_wiki_theme,
+        wiki_commands::get_wiki_files,
+        wiki_commands::read_wiki_file,
+        wiki_commands::search_wiki,
+        wiki_commands::get_wiki_dir,
+        wiki_commands::find_wiki_for_tool,
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

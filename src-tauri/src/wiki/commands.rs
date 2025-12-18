@@ -1,78 +1,61 @@
 // Wiki 相关的 Tauri 命令
 use crate::wiki::server::WikiServer;
-use std::sync::Mutex;
-
-// 全局 Wiki 服务器实例
-static WIKI_SERVER: Mutex<Option<WikiServer>> = Mutex::new(None);
-
-/// 启动 Wiki 服务器
-#[tauri::command]
-pub fn start_wiki_server() -> Result<String, String> {
-  let mut server_guard = WIKI_SERVER.lock().unwrap();
-  
-  if server_guard.is_none() {
-    let mut server = WikiServer::new();
-    server.start()?;
-    *server_guard = Some(server);
-    Ok("Wiki 服务器已启动".to_string())
-  } else {
-    Ok("Wiki 服务器已在运行".to_string())
-  }
-}
-
-/// 停止 Wiki 服务器
-#[tauri::command]
-pub fn stop_wiki_server() -> Result<String, String> {
-  let mut server_guard = WIKI_SERVER.lock().unwrap();
-  
-  if let Some(mut server) = server_guard.take() {
-    server.stop();
-    Ok("Wiki 服务器已停止".to_string())
-  } else {
-    Ok("Wiki 服务器未运行".to_string())
-  }
-}
 
 /// 获取 Wiki 文件列表
 #[tauri::command]
 pub fn get_wiki_files() -> Result<Vec<crate::wiki::types::WikiFileInfo>, String> {
-  let server_guard = WIKI_SERVER.lock().unwrap();
-  
-  if let Some(server) = server_guard.as_ref() {
-    server.list_files()
-  } else {
-    // 如果服务器未启动，创建临时实例获取文件列表
-    let server = WikiServer::new();
-    server.list_files()
-  }
+  // 直接创建实例获取文件列表，不依赖服务器
+  let server = WikiServer::new();
+  server.list_files()
 }
 
-/// 渲染 Markdown 文件
+/// 读取 Wiki 文件内容（不渲染，返回原始文本）
+/// 支持读取 Markdown 文件和主题 CSS 文件
 #[tauri::command]
-pub fn render_wiki_file(file_path: String) -> Result<crate::wiki::types::RenderResult, String> {
-  let server_guard = WIKI_SERVER.lock().unwrap();
+pub fn read_wiki_file(file_path: String) -> Result<String, String> {
+  use crate::utils::{get_docs_dir, get_theme_dir};
+  use std::fs;
   
-  if let Some(server) = server_guard.as_ref() {
-    server.render_file(&file_path)
-  } else {
-    // 如果服务器未启动，创建临时实例渲染文件
-    let server = WikiServer::new();
-    server.render_file(&file_path)
+  // 如果是主题文件，从 themes 目录读取
+  if file_path.starts_with("themes/") {
+    let theme_dir = get_theme_dir();
+    let theme_name = file_path.strip_prefix("themes/").unwrap_or(&file_path);
+    let full_path = theme_dir.join(theme_name);
+    
+    if !full_path.exists() {
+      return Err(format!("主题文件不存在: {}", file_path));
+    }
+    
+    if !full_path.is_file() {
+      return Err(format!("路径不是文件: {}", file_path));
+    }
+    
+    return fs::read_to_string(&full_path)
+      .map_err(|e| format!("读取主题文件失败: {}", e));
   }
+  
+  // 否则从 docs 目录读取
+  let docs_dir = get_docs_dir();
+  let full_path = docs_dir.join(&file_path);
+  
+  if !full_path.exists() {
+    return Err(format!("Wiki 文件不存在: {}", file_path));
+  }
+  
+  if !full_path.is_file() {
+    return Err(format!("路径不是文件: {}", file_path));
+  }
+  
+  fs::read_to_string(&full_path)
+    .map_err(|e| format!("读取文件失败: {}", e))
 }
 
 /// 搜索 Wiki
 #[tauri::command]
 pub fn search_wiki(query: String) -> Result<Vec<crate::wiki::types::SearchResult>, String> {
-  let server_guard = WIKI_SERVER.lock().unwrap();
-  
-  if let Some(server) = server_guard.as_ref() {
-    server.search(&query)
-  } else {
-    // 如果服务器未启动，创建临时实例搜索
-    let server = WikiServer::new();
-    server.search(&query)
-  }
+  // 直接创建实例搜索，不依赖服务器
+  let server = WikiServer::new();
+  server.search(&query)
 }
 
 /// 获取 Wiki 目录路径
@@ -85,25 +68,16 @@ pub fn get_wiki_dir() -> Result<String, String> {
 /// 获取可用主题列表
 #[tauri::command]
 pub fn get_wiki_themes() -> Result<Vec<String>, String> {
-  use crate::utils::get_wiki_dir;
-  let wiki_dir = get_wiki_dir();
-  let theme_dir = wiki_dir.join("theme");
+  use crate::utils::get_theme_dir;
+  let theme_dir = get_theme_dir();
   
   if !theme_dir.exists() {
-    // 如果主题目录不存在，创建它并创建默认主题文件
+    // 如果主题目录不存在，创建它
     if let Err(e) = std::fs::create_dir_all(&theme_dir) {
       return Err(format!("创建主题目录失败: {}", e));
     }
     
-    // 创建默认主题文件（如果不存在）
-    let default_theme = theme_dir.join("default.css");
-    if !default_theme.exists() {
-      let default_css = include_str!("../../static/wiki_styles.css");
-      if let Err(e) = std::fs::write(&default_theme, default_css) {
-        log::warn!("创建默认主题文件失败: {}", e);
-      }
-    }
-    
+    // 不自动创建默认主题文件，让用户自己添加 Typora 主题
     return Ok(vec!["default".to_string()]);
   }
   
@@ -196,11 +170,10 @@ pub fn find_wiki_for_tool(tool_id: String, tool_name: Option<String>) -> Result<
 /// 设置当前主题
 #[tauri::command]
 pub fn set_wiki_theme(theme_name: String) -> Result<String, String> {
-  use crate::utils::get_wiki_dir;
+  use crate::utils::get_theme_dir;
   use std::fs;
   
-  let wiki_dir = get_wiki_dir();
-  let theme_dir = wiki_dir.join("theme");
+  let theme_dir = get_theme_dir();
   std::fs::create_dir_all(&theme_dir)
     .map_err(|e| format!("创建主题目录失败: {}", e))?;
   
@@ -212,41 +185,4 @@ pub fn set_wiki_theme(theme_name: String) -> Result<String, String> {
   Ok("主题已更新".to_string())
 }
 
-/// 从 CSS 内容提取主题描述（从注释中）
-fn extract_theme_description(css_content: &str) -> Option<String> {
-  // 查找 /* Theme: description */ 格式的注释
-  for line in css_content.lines() {
-    let trimmed = line.trim();
-    if trimmed.starts_with("/*") && trimmed.contains("Theme:") {
-      if let Some(desc_start) = trimmed.find("Theme:") {
-        let desc = &trimmed[desc_start + 6..];
-        if let Some(desc_end) = desc.find("*/") {
-          return Some(desc[..desc_end].trim().to_string());
-        }
-      }
-    }
-  }
-  None
-}
-
-/// 格式化主题名称（将 snake_case 或 kebab-case 转换为显示名称）
-fn format_theme_name(name: &str) -> String {
-  if name == "default" {
-    return "默认主题".to_string();
-  }
-  
-  name
-    .replace('_', " ")
-    .replace('-', " ")
-    .split_whitespace()
-    .map(|word| {
-      let mut chars = word.chars();
-      match chars.next() {
-        None => String::new(),
-        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
-      }
-    })
-    .collect::<Vec<_>>()
-    .join(" ")
-}
 

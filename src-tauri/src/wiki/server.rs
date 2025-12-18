@@ -1,91 +1,38 @@
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use tokio::sync::Mutex as TokioMutex;
-use std::thread;
-use std::time::Duration;
-use crate::wiki::parser::MarkdownParser;
 use crate::wiki::types::*;
-use crate::utils::get_wiki_dir;
+use crate::utils::{get_wiki_dir, get_docs_dir};
 
-/// Wiki 服务器状态
+/// Wiki 服务器（简化版，只负责文件操作，不启动 HTTP 服务器）
 pub struct WikiServer {
   wiki_dir: PathBuf,
-  parser: MarkdownParser,
-  port: u16,
-  server_handle: Option<thread::JoinHandle<()>>,
-  is_running: Arc<std::sync::Mutex<bool>>, // 用于线程间通信
 }
 
 impl WikiServer {
   pub fn new() -> Self {
     let wiki_dir = get_wiki_dir();
+    let docs_dir = get_docs_dir();
     
-    // 确保 Wiki 目录存在
+    // 确保 Wiki 目录和子目录存在
     if !wiki_dir.exists() {
       if let Err(e) = fs::create_dir_all(&wiki_dir) {
         log::warn!("创建 Wiki 目录失败: {}", e);
       }
     }
+    if !docs_dir.exists() {
+      if let Err(e) = fs::create_dir_all(&docs_dir) {
+        log::warn!("创建 Wiki 目录失败: {}", e);
+      }
+    }
+    
+    // 确保子目录存在
+    let _ = fs::create_dir_all(&docs_dir.join("tools"));
+    let _ = fs::create_dir_all(&docs_dir.join("notes"));
+    let _ = fs::create_dir_all(&docs_dir.join("labs"));
     
     Self {
-      wiki_dir,
-      parser: MarkdownParser::new(),
-      port: 8777,
-      server_handle: None,
-      is_running: Arc::new(std::sync::Mutex::new(false)),
+      wiki_dir: docs_dir, // 使用 docs_dir 作为基础目录
     }
-  }
-
-  /// 启动 Wiki 服务器
-  pub fn start(&mut self) -> Result<(), String> {
-    let mut is_running = self.is_running.lock().unwrap();
-    if *is_running {
-      return Ok(()); // 已经运行
-    }
-    *is_running = true;
-    drop(is_running);
-    
-    let wiki_dir = self.wiki_dir.clone();
-    let port = self.port;
-    let is_running_clone = Arc::clone(&self.is_running);
-    
-    // 使用 axum HTTP 服务器（异步）
-    let handle = thread::spawn(move || {
-      let rt = tokio::runtime::Runtime::new().unwrap();
-      let is_running_tokio = Arc::new(TokioMutex::new(true));
-      {
-        let guard = is_running_clone.lock().unwrap();
-        let mut tokio_guard = rt.block_on(is_running_tokio.lock());
-        *tokio_guard = *guard;
-      }
-      rt.block_on(crate::wiki::http_server::start_http_server(
-        wiki_dir,
-        port,
-        is_running_tokio,
-      ));
-    });
-    
-    self.server_handle = Some(handle);
-    
-    // 等待服务器启动
-    thread::sleep(Duration::from_millis(500));
-    
-    log::info!("Wiki 服务器已启动在端口 {}", self.port);
-    Ok(())
-  }
-
-  /// 停止 Wiki 服务器
-  pub fn stop(&mut self) {
-    let mut is_running = self.is_running.lock().unwrap();
-    *is_running = false;
-    drop(is_running);
-    
-    if let Some(handle) = self.server_handle.take() {
-      handle.join().ok();
-    }
-    
-    log::info!("Wiki 服务器已停止");
   }
 
   /// 获取 Wiki 目录
@@ -98,25 +45,13 @@ impl WikiServer {
     list_wiki_files(&self.wiki_dir, &self.wiki_dir)
   }
 
-  /// 渲染 Markdown 文件
-  pub fn render_file(&self, file_path: &str) -> Result<RenderResult, String> {
-    let full_path = self.wiki_dir.join(file_path);
-    
-    if !full_path.exists() {
-      return Err(format!("文件不存在: {}", file_path));
-    }
-    
-    self.parser.render_file(&full_path)
-  }
-
   /// 搜索 Wiki
   pub fn search(&self, query: &str) -> Result<Vec<SearchResult>, String> {
     search_wiki_files(&self.wiki_dir, query)
   }
 }
 
-
-/// 列出 Wiki 文件（公开函数，供 http_server 使用）
+/// 列出 Wiki 文件
 pub fn list_wiki_files(root: &Path, current: &Path) -> Result<Vec<WikiFileInfo>, String> {
   let mut files = Vec::new();
   
@@ -127,184 +62,169 @@ pub fn list_wiki_files(root: &Path, current: &Path) -> Result<Vec<WikiFileInfo>,
   let entries = fs::read_dir(current)
     .map_err(|e| format!("读取目录失败: {}", e))?;
   
+  let mut dirs = Vec::new();
+  let mut md_files = Vec::new();
+  
   for entry in entries {
     let entry = entry.map_err(|e| format!("读取目录项失败: {}", e))?;
     let path = entry.path();
     let metadata = entry.metadata()
-      .map_err(|e| format!("获取文件信息失败: {}", e))?;
+      .map_err(|e| format!("获取文件元数据失败: {}", e))?;
     
     if metadata.is_dir() {
       // 跳过隐藏目录和特殊目录
       if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-        if name.starts_with('.') {
+        if name.starts_with('.') || name == "node_modules" || name == "target" {
           continue;
         }
+        dirs.push(path);
       }
-      
-      let children = list_wiki_files(root, &path)?;
-      let relative_path = path.strip_prefix(root)
-        .unwrap_or(&path)
-        .to_string_lossy()
-        .replace('\\', "/");
-      
-      files.push(WikiFileInfo {
-        path: relative_path,
-        name: path.file_name()
-          .and_then(|n| n.to_str())
-          .unwrap_or("")
-          .to_string(),
-        title: path.file_name()
-          .and_then(|n| n.to_str())
-          .unwrap_or("")
-          .to_string(),
-        is_dir: true,
-        children: Some(children),
-      });
     } else if metadata.is_file() {
-      // 只处理 .md 文件
-      if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-        if ext.to_lowercase() == "md" {
-          let relative_path = path.strip_prefix(root)
-            .unwrap_or(&path)
-            .to_string_lossy()
-            .replace('\\', "/");
-          
-          // 尝试从文件第一行提取标题
-          let title = extract_file_title(&path).unwrap_or_else(|| {
-            path.file_stem()
-              .and_then(|n| n.to_str())
-              .unwrap_or("")
-              .to_string()
-          });
-          
-          files.push(WikiFileInfo {
-            path: relative_path,
-            name: path.file_name()
-              .and_then(|n| n.to_str())
-              .unwrap_or("")
-              .to_string(),
-            title,
-            is_dir: false,
-            children: None,
-          });
+      // 只处理 Markdown 文件
+      if let Some(ext) = path.extension() {
+        if ext == "md" || ext == "markdown" {
+          md_files.push(path);
         }
       }
     }
   }
   
-  // 排序：目录在前，然后按名称排序
-  files.sort_by(|a, b| {
-    match (a.is_dir, b.is_dir) {
-      (true, false) => std::cmp::Ordering::Less,
-      (false, true) => std::cmp::Ordering::Greater,
-      _ => a.name.cmp(&b.name),
+  // 先添加目录
+  dirs.sort();
+  for dir_path in dirs {
+    if let Some(name) = dir_path.file_name().and_then(|n| n.to_str()) {
+      let relative_path = dir_path.strip_prefix(root)
+        .unwrap_or(&dir_path)
+        .to_string_lossy()
+        .to_string();
+      
+      let children = list_wiki_files(root, &dir_path)?;
+      
+      files.push(WikiFileInfo {
+        name: name.to_string(),
+        path: relative_path,
+        title: name.to_string(),
+        is_dir: true,
+        children: if children.is_empty() { None } else { Some(children) },
+      });
     }
-  });
+  }
+  
+  // 再添加文件
+  md_files.sort();
+  for file_path in md_files {
+    if let Some(name) = file_path.file_name().and_then(|n| n.to_str()) {
+      let relative_path = file_path.strip_prefix(root)
+        .unwrap_or(&file_path)
+        .to_string_lossy()
+        .to_string();
+      
+      // 从文件内容提取标题
+      let title = extract_title_from_file(&file_path).unwrap_or_else(|| {
+        name.trim_end_matches(".md")
+          .trim_end_matches(".markdown")
+          .to_string()
+      });
+      
+      files.push(WikiFileInfo {
+        name: name.to_string(),
+        path: relative_path,
+        title,
+        is_dir: false,
+        children: None,
+      });
+    }
+  }
   
   Ok(files)
 }
 
-/// 从文件第一行提取标题
-fn extract_file_title(file_path: &Path) -> Option<String> {
+/// 从 Markdown 文件提取标题
+fn extract_title_from_file(file_path: &Path) -> Option<String> {
   if let Ok(content) = fs::read_to_string(file_path) {
     for line in content.lines() {
       let trimmed = line.trim();
       if trimmed.starts_with("# ") {
         return Some(trimmed[2..].trim().to_string());
+      } else if trimmed.starts_with("## ") {
+        return Some(trimmed[3..].trim().to_string());
       }
     }
   }
   None
 }
 
-/// 搜索 Wiki 文件（公开函数，供 http_server 使用）
+/// 搜索 Wiki 文件
 pub fn search_wiki_files(root: &Path, query: &str) -> Result<Vec<SearchResult>, String> {
-  let mut results = Vec::new();
   let query_lower = query.to_lowercase();
+  let mut results = Vec::new();
   
-  search_directory(root, root, &query_lower, &mut results)?;
-  
-  Ok(results)
-}
-
-/// 递归搜索目录
-fn search_directory(
-  root: &Path,
-  current: &Path,
-  query: &str,
-  results: &mut Vec<SearchResult>,
-) -> Result<(), String> {
-  if !current.exists() {
-    return Ok(());
-  }
-  
-  let entries = fs::read_dir(current)
-    .map_err(|e| format!("读取目录失败: {}", e))?;
-  
-  for entry in entries {
-    let entry = entry.map_err(|e| format!("读取目录项失败: {}", e))?;
-    let path = entry.path();
-    let metadata = entry.metadata()
-      .map_err(|e| format!("获取文件信息失败: {}", e))?;
+  fn search_recursive(
+    root: &Path,
+    current: &Path,
+    query: &str,
+    results: &mut Vec<SearchResult>,
+  ) -> Result<(), String> {
+    if !current.exists() {
+      return Ok(());
+    }
     
-    if metadata.is_dir() {
-      // 递归搜索子目录
-      search_directory(root, &path, query, results)?;
-    } else if metadata.is_file() {
-      // 只搜索 .md 文件
-      if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-        if ext.to_lowercase() == "md" {
-          if let Ok(content) = fs::read_to_string(&path) {
-            let matches = search_in_content(&content, query);
-            if !matches.is_empty() {
-              let relative_path = path.strip_prefix(root)
-                .unwrap_or(&path)
-                .to_string_lossy()
-                .replace('\\', "/");
+    let entries = fs::read_dir(current)
+      .map_err(|e| format!("读取目录失败: {}", e))?;
+    
+    for entry in entries {
+      let entry = entry.map_err(|e| format!("读取目录项失败: {}", e))?;
+      let path = entry.path();
+      let metadata = entry.metadata()
+        .map_err(|e| format!("获取文件元数据失败: {}", e))?;
+      
+      if metadata.is_dir() {
+        // 递归搜索子目录
+        if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+          if !name.starts_with('.') && name != "node_modules" && name != "target" {
+            search_recursive(root, &path, query, results)?;
+          }
+        }
+      } else if metadata.is_file() {
+        // 搜索 Markdown 文件
+        if let Some(ext) = path.extension() {
+          if ext == "md" || ext == "markdown" {
+            if let Ok(content) = fs::read_to_string(&path) {
+              let content_lower = content.to_lowercase();
               
-              let title = extract_file_title(&path).unwrap_or_else(|| {
-                path.file_stem()
-                  .and_then(|n| n.to_str())
-                  .unwrap_or("")
-                  .to_string()
-              });
+              // 检查文件名或内容是否包含查询
+              let file_name = path.file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("")
+                .to_lowercase();
               
-              results.push(SearchResult {
-                file_path: relative_path,
-                title,
-                matches,
-              });
+              if file_name.contains(&query) || content_lower.contains(&query) {
+                let relative_path = path.strip_prefix(root)
+                  .unwrap_or(&path)
+                  .to_string_lossy()
+                  .to_string();
+                
+                let title = extract_title_from_file(&path)
+                  .unwrap_or_else(|| {
+                    file_name.trim_end_matches(".md")
+                      .trim_end_matches(".markdown")
+                      .to_string()
+                  });
+                
+                results.push(SearchResult {
+                  file_path: relative_path,
+                  title,
+                });
+              }
             }
           }
         }
       }
     }
+    
+    Ok(())
   }
   
-  Ok(())
+  search_recursive(root, root, &query_lower, &mut results)?;
+  Ok(results)
 }
-
-/// 在内容中搜索
-fn search_in_content(content: &str, query: &str) -> Vec<SearchMatch> {
-  let mut matches = Vec::new();
-  let content_lower = content.to_lowercase();
-  
-  for (line_num, line) in content.lines().enumerate() {
-    if line.to_lowercase().contains(query) {
-      // 提取匹配的上下文（前后各 50 个字符）
-      let start = line.to_lowercase().find(query).unwrap_or(0);
-      let end = start + query.len();
-      let context_start = start.saturating_sub(50);
-      let context_end = (end + 50).min(line.len());
-      let text = line[context_start..context_end].trim().to_string();
-      
-      matches.push(SearchMatch {
-        line: (line_num + 1) as u32,
-        text,
-      });
-    }
-  }
-  
-  matches
-}
-

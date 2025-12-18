@@ -98,6 +98,7 @@ export function selectImageFile(): Promise<File | null> {
 }
 
 import { getTauriInvoke } from './tauri'
+import { debug, error as logError, warn } from './logger'
 
 /**
  * 从可执行文件路径提取图标
@@ -109,10 +110,7 @@ export async function extractIconFromExecutable(execPath: string, toolType?: str
   try {
     const invoker = getTauriInvoke()
     if (!invoker) {
-      if (import.meta.env.DEV) {
-        // eslint-disable-next-line no-console
-        console.warn('Tauri API 不可用，无法提取图标:', execPath)
-      }
+      warn('Tauri API 不可用，无法提取图标:', execPath)
       return null
     }
     
@@ -134,10 +132,7 @@ export async function extractIconFromExecutable(execPath: string, toolType?: str
     
     return iconData || null
   } catch (error) {
-    if (import.meta.env.DEV) {
-      // eslint-disable-next-line no-console
-      console.error('提取图标失败:', error)
-    }
+    logError('提取图标失败:', error)
     return null
   }
 }
@@ -151,10 +146,7 @@ export async function fetchFaviconFromUrl(url: string): Promise<string | null> {
   try {
     const invoker = getTauriInvoke()
     if (!invoker) {
-      if (import.meta.env.DEV) {
-        // eslint-disable-next-line no-console
-        console.warn('Tauri API 不可用，无法抓取 favicon:', url)
-      }
+      warn('Tauri API 不可用，无法抓取 favicon:', url)
       return null
     }
     
@@ -175,10 +167,7 @@ export async function fetchFaviconFromUrl(url: string): Promise<string | null> {
     
     return iconData || null
   } catch (error) {
-    if (import.meta.env.DEV) {
-      // eslint-disable-next-line no-console
-      console.error('抓取 favicon 失败:', error)
-    }
+    logError('抓取 favicon 失败:', error)
     return null
   }
 }
@@ -281,10 +270,7 @@ export async function autoFetchIcon(toolType: string | undefined, execPath: stri
       }
     }
   } catch (error) {
-    if (import.meta.env.DEV) {
-      // eslint-disable-next-line no-console
-      console.error('自动获取图标失败:', error)
-    }
+    logError('自动获取图标失败:', error)
     return null
   }
 }

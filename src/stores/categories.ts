@@ -1,5 +1,82 @@
 import { ref, watch } from 'vue'
 import { readConfigFile, writeConfigFile, configFileExists } from '../utils/fileStorage'
+import { getTauriInvoke } from '../utils/tauri'
+import { debug, error as logError, info } from '../utils/logger'
+
+/**
+ * 转换工具项数据（从 JSON 格式到 TypeScript 类型）
+ */
+function transformToolItem(toolItem: Record<string, unknown>): ToolItem {
+  const jarConfig = toolItem.jar_config || toolItem.jarConfig
+  return {
+    id: String(toolItem.id || ''),
+    name: String(toolItem.name || ''),
+    description: toolItem.description ? String(toolItem.description) : undefined,
+    iconUrl: (() => {
+      const iconUrlValue = toolItem.icon_url || toolItem.iconUrl
+      if (!iconUrlValue) return undefined
+      // 直接返回原始路径，不进行任何转换（保留用户手动修改的格式）
+      return String(iconUrlValue)
+    })(),
+    wikiUrl: (toolItem.wiki_url || toolItem.wikiUrl) ? String(toolItem.wiki_url || toolItem.wikiUrl) : undefined,
+    toolType: (() => {
+      const toolTypeValue = toolItem.tool_type || toolItem.toolType
+      if (toolTypeValue && String(toolTypeValue).trim()) {
+        return String(toolTypeValue).trim() as ToolType
+      }
+      return undefined
+    })(),
+    execPath: (() => {
+      const execPathValue = toolItem.exec_path || toolItem.execPath
+      if (execPathValue && String(execPathValue).trim()) {
+        return String(execPathValue).trim()
+      }
+      return undefined
+    })(),
+    args: Array.isArray(toolItem.args) ? (toolItem.args as unknown[]).map(a => String(a)) : undefined,
+    workingDir: toolItem.working_dir || toolItem.workingDir ? String(toolItem.working_dir || toolItem.workingDir) : undefined,
+    jarConfig: jarConfig ? (() => {
+      const config = jarConfig as Record<string, unknown>
+      const jvmArgsValue = config.jvm_args || config.jvmArgs
+      const programArgsValue = config.program_args || config.programArgs
+      return {
+        jarPath: String(config.jar_path || config.jarPath || ''),
+        javaPath: config.java_path || config.javaPath ? String(config.java_path || config.javaPath) : undefined,
+        jvmArgs: Array.isArray(jvmArgsValue) ? (jvmArgsValue as unknown[]).map((a: unknown) => String(a)) : undefined,
+        programArgs: Array.isArray(programArgsValue) ? (programArgsValue as unknown[]).map((a: unknown) => String(a)) : undefined,
+      }
+    })() : undefined,
+  }
+}
+
+/**
+ * 转换子分类数据（从 JSON 格式到 TypeScript 类型）
+ */
+function transformSubCategory(subCategory: Record<string, unknown>): SubCategory {
+  return {
+    id: String(subCategory.id || ''),
+    name: String(subCategory.name || ''),
+    description: subCategory.description ? String(subCategory.description) : undefined,
+    tools: ((subCategory.tools || []) as unknown[]).map((tool: unknown) => {
+      return transformToolItem(tool as Record<string, unknown>)
+    }),
+  }
+}
+
+/**
+ * 转换分类页面数据（从 JSON 格式到 TypeScript 类型）
+ */
+function transformCategoryPageData(category: Record<string, unknown>): CategoryPageData {
+  return {
+    id: String(category.id || ''),
+    name: String(category.name || ''),
+    label: category.label ? String(category.label) : undefined,
+    description: category.description ? String(category.description) : undefined,
+    subCategories: ((category.sub_categories || category.subCategories || []) as unknown[]).map((sub: unknown) => {
+      return transformSubCategory(sub as Record<string, unknown>)
+    }),
+  }
+}
 
 export interface CategoryConfig {
   id: string
@@ -25,7 +102,8 @@ export interface ToolItem {
   id: string
   name: string
   description?: string
-  iconUrl?: string // 工具头像/图标 URL 或 base64 数据URL（优先自动获取，失败则使用默认图标）
+  iconUrl?: string // 工具头像/图标 URL（原始路径，用于保存）
+  _iconBase64?: string // 图标的 base64 数据（仅用于显示，不保存到 JSON）
   wikiUrl?: string
   toolType?: ToolType
   execPath?: string
@@ -189,8 +267,7 @@ const loadCategoriesConfig = async (): Promise<CategoryConfig[]> => {
       }
     }
   } catch (error) {
-    // eslint-disable-next-line no-console
-    console.error('Failed to load categories config from file:', error)
+    logError('Failed to load categories config from file:', error)
   }
   
   // 如果文件不存在或解析失败，返回默认配置
@@ -217,78 +294,87 @@ const saveCategoriesConfig = async () => {
 
     const content = JSON.stringify(categoriesToSave, null, 2)
     
-    if (import.meta.env.DEV) {
-      // eslint-disable-next-line no-console
-      console.log('保存分类配置:', {
-        categoriesCount: categoriesToSave.length,
-        contentLength: content.length,
-      })
-    }
+    debug('保存分类配置:', {
+      categoriesCount: categoriesToSave.length,
+      contentLength: content.length,
+    })
     
     await writeConfigFile('categories.json', content)
     
-    if (import.meta.env.DEV) {
-      // eslint-disable-next-line no-console
-      console.log('✅ 分类配置文件保存成功')
-    }
+    info('✅ 分类配置文件保存成功')
   } catch (error) {
-    // eslint-disable-next-line no-console
-    console.error('Failed to save categories config:', error)
+    logError('Failed to save categories config:', error)
   }
 }
 
 // 保存工具数据到 JSON 文件
-const saveToolsData = async () => {
+export const saveToolsData = async () => {
   try {
     // 转换工具数据格式
-    const dataToSave = categoriesData.value.map((cat) => ({
+    const dataToSave = await Promise.all(categoriesData.value.map(async (cat) => ({
       id: cat.id,
       name: cat.name,
       label: cat.label,
       description: cat.description,
-      sub_categories: cat.subCategories.map((sub) => ({
+      sub_categories: await Promise.all(cat.subCategories.map(async (sub) => ({
         id: sub.id,
         name: sub.name,
         description: sub.description,
-        tools: sub.tools.map((tool) => ({
-          id: tool.id,
-          name: tool.name,
-          description: tool.description,
-          icon_url: tool.iconUrl,
-          wiki_url: tool.wikiUrl,
-          tool_type: tool.toolType || null,
-          exec_path: tool.execPath,
-          args: tool.args,
-          working_dir: tool.workingDir,
-          jar_config: tool.jarConfig ? {
-            jar_path: tool.jarConfig.jarPath,
-            java_path: tool.jarConfig.javaPath,
-            jvm_args: tool.jarConfig.jvmArgs,
-            program_args: tool.jarConfig.programArgs,
-          } : undefined,
+        tools: await Promise.all(sub.tools.map(async (tool) => {
+          // 如果图标是 base64 数据 URL，保存到缓存并转换为相对路径
+          let iconUrl = tool.iconUrl
+          if (iconUrl && iconUrl.startsWith('data:image')) {
+            try {
+              const { saveIconToCache } = await import('../utils/fileStorage')
+              const iconPath = await saveIconToCache(iconUrl)
+              iconUrl = iconPath
+              debug('保存时转换 base64 图标为相对路径:', { toolId: tool.id, toolName: tool.name, iconPath })
+            } catch (error) {
+              logError('保存图标到缓存失败:', { toolId: tool.id, toolName: tool.name, error })
+              // 如果保存失败，继续使用 base64（向后兼容）
+            }
+          }
+          // 其他格式的路径（icons/, .config/icons/, 绝对路径等）直接保存，不进行转换
+          
+          return {
+            id: tool.id,
+            name: tool.name,
+            description: tool.description,
+            icon_url: iconUrl,
+            wiki_url: tool.wikiUrl,
+            tool_type: tool.toolType || null,
+            exec_path: tool.execPath,
+            args: tool.args,
+            working_dir: tool.workingDir,
+            jar_config: tool.jarConfig ? {
+              jar_path: tool.jarConfig.jarPath,
+              java_path: tool.jarConfig.javaPath,
+              jvm_args: tool.jarConfig.jvmArgs,
+              program_args: tool.jarConfig.programArgs,
+            } : undefined,
+          }
         })),
-      })),
-    }))
+      }))),
+    })))
 
     const content = JSON.stringify(dataToSave, null, 2)
     
-    if (import.meta.env.DEV) {
-      // eslint-disable-next-line no-console
-      console.log('保存工具数据:', {
-        dataCount: dataToSave.length,
-        contentLength: content.length,
-      })
-    }
+    debug('保存工具数据:', {
+      dataCount: dataToSave.length,
+      contentLength: content.length,
+      categories: dataToSave.map(c => ({
+        id: c.id,
+        name: c.name,
+        subCategoriesCount: c.sub_categories.length,
+        toolsCount: c.sub_categories.reduce((sum, sub) => sum + sub.tools.length, 0)
+      }))
+    })
     
     await writeConfigFile('tools.json', content)
     
-    if (import.meta.env.DEV) {
-      // eslint-disable-next-line no-console
-      console.log('✅ 工具数据文件保存成功')
-    }
+    info('✅ 工具数据文件保存成功')
   } catch (error) {
-    // eslint-disable-next-line no-console
-    console.error('Failed to save tools data:', error)
+    logError('Failed to save tools data:', error)
   }
 }
 
@@ -404,59 +490,7 @@ const loadCategoriesData = async (): Promise<CategoryPageData[]> => {
       if (Array.isArray(parsed) && parsed.length > 0) {
         // 转换数据格式
         return parsed.map((cat: unknown) => {
-          const category = cat as Record<string, unknown>
-          return {
-            id: String(category.id || ''),
-            name: String(category.name || ''),
-            label: category.label ? String(category.label) : undefined,
-            description: category.description ? String(category.description) : undefined,
-            subCategories: ((category.sub_categories || category.subCategories || []) as unknown[]).map((sub: unknown) => {
-              const subCategory = sub as Record<string, unknown>
-              return {
-                id: String(subCategory.id || ''),
-                name: String(subCategory.name || ''),
-                description: subCategory.description ? String(subCategory.description) : undefined,
-                tools: ((subCategory.tools || []) as unknown[]).map((tool: unknown) => {
-                  const toolItem = tool as Record<string, unknown>
-                  const jarConfig = toolItem.jar_config || toolItem.jarConfig
-                  return {
-                    id: String(toolItem.id || ''),
-                    name: String(toolItem.name || ''),
-                    description: toolItem.description ? String(toolItem.description) : undefined,
-                    iconUrl: (toolItem.icon_url || toolItem.iconUrl) ? String(toolItem.icon_url || toolItem.iconUrl) : undefined,
-                    wikiUrl: (toolItem.wiki_url || toolItem.wikiUrl) ? String(toolItem.wiki_url || toolItem.wikiUrl) : undefined,
-                    toolType: (() => {
-                      const toolTypeValue = toolItem.tool_type || toolItem.toolType
-                      if (toolTypeValue && String(toolTypeValue).trim()) {
-                        return String(toolTypeValue).trim() as ToolType
-                      }
-                      return undefined
-                    })(),
-                    execPath: (() => {
-                      const execPathValue = toolItem.exec_path || toolItem.execPath
-                      if (execPathValue && String(execPathValue).trim()) {
-                        return String(execPathValue).trim()
-                      }
-                      return undefined
-                    })(),
-                    args: Array.isArray(toolItem.args) ? (toolItem.args as unknown[]).map(a => String(a)) : undefined,
-                    workingDir: toolItem.working_dir || toolItem.workingDir ? String(toolItem.working_dir || toolItem.workingDir) : undefined,
-                    jarConfig: jarConfig ? (() => {
-                      const config = jarConfig as Record<string, unknown>
-                      const jvmArgsValue = config.jvm_args || config.jvmArgs
-                      const programArgsValue = config.program_args || config.programArgs
-                      return {
-                        jarPath: String(config.jar_path || config.jarPath || ''),
-                        javaPath: config.java_path || config.javaPath ? String(config.java_path || config.javaPath) : undefined,
-                        jvmArgs: Array.isArray(jvmArgsValue) ? (jvmArgsValue as unknown[]).map((a: unknown) => String(a)) : undefined,
-                        programArgs: Array.isArray(programArgsValue) ? (programArgsValue as unknown[]).map((a: unknown) => String(a)) : undefined,
-                      }
-                    })() : undefined,
-                  }
-                }),
-              }
-            }),
-          }
+          return transformCategoryPageData(cat as Record<string, unknown>)
         })
       }
       // 兼容旧格式：如果文件包含 data 字段
@@ -464,64 +498,12 @@ const loadCategoriesData = async (): Promise<CategoryPageData[]> => {
       if (Array.isArray(data) && data.length > 0) {
         // 转换数据格式（如果是从旧格式）
         return data.map((cat: unknown) => {
-          const category = cat as Record<string, unknown>
-          return {
-            id: String(category.id || ''),
-            name: String(category.name || ''),
-            label: category.label ? String(category.label) : undefined,
-            description: category.description ? String(category.description) : undefined,
-            subCategories: ((category.sub_categories || category.subCategories || []) as unknown[]).map((sub: unknown) => {
-              const subCategory = sub as Record<string, unknown>
-              return {
-                id: String(subCategory.id || ''),
-                name: String(subCategory.name || ''),
-                description: subCategory.description ? String(subCategory.description) : undefined,
-                tools: ((subCategory.tools || []) as unknown[]).map((tool: unknown) => {
-                  const toolItem = tool as Record<string, unknown>
-                  const jarConfig = toolItem.jar_config || toolItem.jarConfig
-                  return {
-                    id: String(toolItem.id || ''),
-                    name: String(toolItem.name || ''),
-                    description: toolItem.description ? String(toolItem.description) : undefined,
-                    iconUrl: (toolItem.icon_url || toolItem.iconUrl) ? String(toolItem.icon_url || toolItem.iconUrl) : undefined,
-                    wikiUrl: (toolItem.wiki_url || toolItem.wikiUrl) ? String(toolItem.wiki_url || toolItem.wikiUrl) : undefined,
-                    toolType: (() => {
-                      const toolTypeValue = toolItem.tool_type || toolItem.toolType
-                      if (toolTypeValue && String(toolTypeValue).trim()) {
-                        return String(toolTypeValue).trim() as ToolType
-                      }
-                      return undefined
-                    })(),
-                    execPath: (() => {
-                      const execPathValue = toolItem.exec_path || toolItem.execPath
-                      if (execPathValue && String(execPathValue).trim()) {
-                        return String(execPathValue).trim()
-                      }
-                      return undefined
-                    })(),
-                    args: Array.isArray(toolItem.args) ? (toolItem.args as unknown[]).map(a => String(a)) : undefined,
-                    workingDir: toolItem.working_dir || toolItem.workingDir ? String(toolItem.working_dir || toolItem.workingDir) : undefined,
-                    jarConfig: jarConfig ? (() => {
-                      const config = jarConfig as Record<string, unknown>
-                      const jvmArgsValue = config.jvm_args || config.jvmArgs
-                      const programArgsValue = config.program_args || config.programArgs
-                      return {
-                        jarPath: String(config.jar_path || config.jarPath || ''),
-                        javaPath: config.java_path || config.javaPath ? String(config.java_path || config.javaPath) : undefined,
-                        jvmArgs: Array.isArray(jvmArgsValue) ? (jvmArgsValue as unknown[]).map((a: unknown) => String(a)) : undefined,
-                        programArgs: Array.isArray(programArgsValue) ? (programArgsValue as unknown[]).map((a: unknown) => String(a)) : undefined,
-                      }
-                    })() : undefined,
-                  }
-                }),
-              }
-            }),
-          }
+          return transformCategoryPageData(cat as Record<string, unknown>)
         })
       }
     }
   } catch (error) {
-    console.error('Failed to load categories data from file:', error)
+    logError('Failed to load categories data from file:', error)
   }
   
   return defaultData
@@ -545,8 +527,7 @@ Promise.all([
   // 标记数据已初始化完成
   isDataInitialized = true
   
-  // eslint-disable-next-line no-console
-  console.log('数据加载完成:', {
+  info('数据加载完成:', {
     categoriesCount: config.length,
     dataCount: data.length,
     categoriesIds: config.map(c => c.id),
@@ -554,22 +535,40 @@ Promise.all([
   
   // 检查配置文件是否存在，如果不存在则创建
   try {
+    // 获取配置文件路径（用于显示给用户）
+    const invoker = getTauriInvoke()
+    let categoriesPath = '未知'
+    let toolsPath = '未知'
+    if (invoker) {
+      try {
+        categoriesPath = await invoker<string>('get_config_file_path', { filename: 'categories.json' })
+        toolsPath = await invoker<string>('get_config_file_path', { filename: 'tools.json' })
+        info('配置文件位置:', {
+          categories: categoriesPath,
+          tools: toolsPath,
+        })
+      } catch (err) {
+        debug('无法获取配置文件路径:', err)
+      }
+    }
+    
     const categoriesFileExists = await configFileExists('categories.json')
     const toolsFileExists = await configFileExists('tools.json')
     
-    // eslint-disable-next-line no-console
-    console.log('配置文件存在检查结果:', {
+    info('配置文件存在检查结果:', {
       categories: categoriesFileExists,
+      categoriesPath,
       tools: toolsFileExists,
+      toolsPath,
       loadedCategoriesCount: config.length,
       loadedDataCount: data.length,
     })
     
     // 如果分类配置文件不存在，使用默认值创建
     if (!categoriesFileExists) {
-      // eslint-disable-next-line no-console
-      console.log('分类配置文件不存在，使用默认值创建', {
+      info('⚠️ 分类配置文件不存在，使用默认值创建', {
         categoriesCount: config.length,
+        path: categoriesPath,
       })
       // 临时禁用 watch，避免触发保存
       const wasInitialized = isDataInitialized
@@ -579,22 +578,19 @@ Promise.all([
       
       const created = await configFileExists('categories.json')
       if (created) {
-        // eslint-disable-next-line no-console
-        console.log('✅ 分类配置文件创建成功')
+        info('✅ 分类配置文件创建成功', { path: categoriesPath })
       } else {
-        // eslint-disable-next-line no-console
-        console.error('❌ 分类配置文件创建失败，请检查 Tauri API 是否可用')
+        logError('❌ 分类配置文件创建失败，请检查 Tauri API 是否可用', { path: categoriesPath })
       }
     } else {
-      // eslint-disable-next-line no-console
-      console.log('分类配置文件已存在，跳过创建')
+      debug('分类配置文件已存在，跳过创建', { path: categoriesPath })
     }
     
     // 如果工具数据文件不存在，使用默认值创建
     if (!toolsFileExists) {
-      // eslint-disable-next-line no-console
-      console.log('工具数据文件不存在，使用默认值创建', {
+      info('⚠️ 工具数据文件不存在，使用默认值创建', {
         dataCount: data.length,
+        path: toolsPath,
       })
       // 临时禁用 watch，避免触发保存
       const wasInitialized = isDataInitialized
@@ -604,19 +600,15 @@ Promise.all([
       
       const created = await configFileExists('tools.json')
       if (created) {
-        // eslint-disable-next-line no-console
-        console.log('✅ 工具数据文件创建成功')
+        info('✅ 工具数据文件创建成功', { path: toolsPath })
       } else {
-        // eslint-disable-next-line no-console
-        console.error('❌ 工具数据文件创建失败，请检查 Tauri API 是否可用')
+        logError('❌ 工具数据文件创建失败，请检查 Tauri API 是否可用', { path: toolsPath })
       }
     } else {
-      // eslint-disable-next-line no-console
-      console.log('工具数据文件已存在，跳过创建')
+      debug('工具数据文件已存在，跳过创建', { path: toolsPath })
     }
   } catch (error) {
-    // eslint-disable-next-line no-console
-    console.error('检查或创建配置文件时出错:', error)
+    logError('检查或创建配置文件时出错:', error)
   }
 })
 

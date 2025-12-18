@@ -4,6 +4,7 @@ use std::process::Command;
 use regex::Regex;
 use image::{DynamicImage, GenericImageView};
 use base64::{Engine as _, engine::general_purpose};
+use sha2::Digest;
 use crate::types::ExtractIconParams;
 use crate::utils::{get_icons_dir, hash_path};
 
@@ -448,6 +449,51 @@ pub fn extract_icon_from_file(params: ExtractIconParams) -> Result<String, Strin
   log::info!("图标缓存已保存: {}", cache_path.to_string_lossy());
   
   Ok(base64)
+}
+
+/// 保存 base64 图标到 icons 目录并返回相对路径
+/// 用于将 base64 数据 URL 转换为文件路径，方便在配置文件中使用
+#[tauri::command]
+pub fn save_icon_to_cache(icon_data: String) -> Result<String, String> {
+  use base64::{Engine as _, engine::general_purpose};
+  
+  // 解析 base64 数据 URL
+  let base64_str = if icon_data.starts_with("data:image") {
+    // 提取 base64 部分（data:image/png;base64,xxxxx）
+    if let Some(comma_idx) = icon_data.find(',') {
+      &icon_data[comma_idx + 1..]
+    } else {
+      return Err("无效的 base64 数据 URL 格式".to_string());
+    }
+  } else {
+    // 假设是纯 base64 字符串
+    &icon_data
+  };
+  
+  // 解码 base64
+  let image_bytes = general_purpose::STANDARD.decode(base64_str.trim())
+    .map_err(|e| format!("Base64 解码失败: {}", e))?;
+  
+  // 验证是否为有效的图片
+  let _img = image::load_from_memory(&image_bytes)
+    .map_err(|e| format!("无效的图片数据: {}", e))?;
+  
+  // 生成缓存文件名（使用内容的哈希值）
+  let mut hasher = sha2::Sha256::new();
+  hasher.update(&image_bytes);
+  let hash = hasher.finalize();
+  let cache_key = hex::encode(&hash[..16]); // 使用前16字节，32个十六进制字符
+  let cache_path = get_icons_dir().join(format!("{}.png", cache_key));
+  
+  // 保存文件
+  fs::write(&cache_path, &image_bytes)
+    .map_err(|e| format!("保存图标缓存失败: {}", e))?;
+  
+  log::info!("图标已保存到缓存: {}", cache_path.to_string_lossy());
+  
+  // 返回相对路径（相对于配置目录）
+  // 格式：.config/icons/{hash}.png
+  Ok(format!(".config/icons/{}.png", cache_key))
 }
 
 /// 从 URL 抓取 favicon

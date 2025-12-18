@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch, nextTick } from 'vue'
+import { computed, ref, watch, nextTick, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ContextMenu, { type MenuItem } from '../components/ContextMenu.vue'
 import ModalDialog from '../components/ModalDialog.vue'
@@ -17,7 +17,10 @@ import { openFileDialog } from '../utils/fileDialog'
 import { selectImageFile, processImage, autoFetchIcon, detectFileTypeFromPath } from '../utils/imageProcessor'
 import { getTauriInvoke } from '../utils/tauri'
 import { launchTool } from '../utils/toolLauncher'
-import { debug, error as logError } from '../utils/logger'
+import { saveIconToCache } from '../utils/fileStorage'
+import { getIconUrl } from '../utils/iconLoader'
+import { debug, error as logError, warn, info } from '../utils/logger'
+import WikiModal from '../components/WikiModal.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -70,11 +73,79 @@ const currentSub = computed(() => {
 
 const tools = computed(() => currentSub.value?.tools ?? [])
 
+// 获取工具图标的显示 URL（优先使用 base64，否则使用原始路径）
+const getToolIconUrl = (tool: ToolItem): string | undefined => {
+  // 如果有 base64，优先使用（用于显示）
+  if (tool._iconBase64) {
+    return tool._iconBase64
+  }
+  // 如果有 base64 格式的 iconUrl（向后兼容）
+  if (tool.iconUrl && tool.iconUrl.startsWith('data:image')) {
+    return tool.iconUrl
+  }
+  // 否则使用原始路径
+  return tool.iconUrl
+}
+
 // 自动获取工具图标（在工具加载时，如果还没有图标）
 const autoFetchToolIcons = async () => {
-  if (!currentSub.value) return
+  if (!currentSub.value) {
+    debug('autoFetchToolIcons: currentSub 为空，跳过')
+    return
+  }
+  
+  debug('autoFetchToolIcons: 开始处理', { toolsCount: currentSub.value.tools.length })
   
   for (const tool of currentSub.value.tools) {
+    // 如果图标路径需要转换为 base64（用于显示）
+    // 支持多种格式：icons/, .config/icons/, 绝对路径等
+    if (tool.iconUrl && !tool.iconUrl.startsWith('data:image') && !tool.iconUrl.startsWith('http://') && !tool.iconUrl.startsWith('https://')) {
+      const originalPath = tool.iconUrl // 保存原始路径用于日志
+      
+      debug('发现图标路径需要转换为 base64:', { 
+        toolId: tool.id, 
+        toolName: tool.name, 
+        iconPath: originalPath
+      })
+      
+      try {
+        // 直接使用原始路径读取，不进行规范化
+        const base64Url = await getIconUrl(originalPath)
+        if (base64Url && base64Url.startsWith('data:image')) {
+          // 将 base64 存储到 _iconBase64 字段，保留原始路径在 iconUrl 中
+          // 这样保存时可以使用原始路径，显示时使用 base64
+          tool._iconBase64 = base64Url
+          info('✅ 图标已加载为 base64（保留原始路径）:', { 
+            toolId: tool.id, 
+            toolName: tool.name, 
+            originalPath,
+            convertedLength: base64Url.length 
+          })
+        } else {
+          warn('⚠️ 图标路径读取返回无效数据:', { 
+            toolId: tool.id, 
+            toolName: tool.name, 
+            originalPath,
+            result: base64Url ? base64Url.substring(0, 50) : 'null',
+            resultType: typeof base64Url
+          })
+          // 如果读取失败，清除 base64，保留原始路径
+          tool._iconBase64 = undefined
+        }
+      } catch (error) {
+        logError('❌ 读取图标文件失败:', { 
+          toolId: tool.id, 
+          toolName: tool.name, 
+          iconPath: originalPath, 
+          error,
+          errorMessage: error instanceof Error ? error.message : String(error)
+        })
+        // 读取失败时，清除 base64，保留原始路径
+        tool._iconBase64 = undefined
+      }
+      continue
+    }
+    
     // 如果工具已经有图标，跳过
     if (tool.iconUrl) continue
     
@@ -89,17 +160,11 @@ const autoFetchToolIcons = async () => {
           const autoIcon = await autoFetchIcon(tool.toolType, execPath)
           if (autoIcon) {
             tool.iconUrl = autoIcon
-            if (import.meta.env.DEV) {
-              // eslint-disable-next-line no-console
-              console.log('自动获取工具图标成功:', { toolId: tool.id, toolName: tool.name, toolType: tool.toolType })
-            }
+            debug('自动获取工具图标成功:', { toolId: tool.id, toolName: tool.name, toolType: tool.toolType })
           }
         } catch (error) {
-          if (import.meta.env.DEV) {
-            // eslint-disable-next-line no-console
-            console.warn('自动获取工具图标失败:', { toolId: tool.id, error })
+            warn('自动获取工具图标失败:', { toolId: tool.id, error })
           }
-        }
       }
     }
   }
@@ -125,10 +190,14 @@ watch(
   currentSub,
   async (newSub) => {
     if (newSub) {
-      // 延迟执行，避免阻塞 UI
-      setTimeout(() => {
-        autoFetchToolIcons()
-      }, 500)
+      debug('currentSub 变化，开始转换图标', { subId: newSub.id, toolsCount: newSub.tools.length })
+      try {
+        // 立即执行图标转换，确保相对路径图标被转换
+        await autoFetchToolIcons()
+        debug('图标转换完成')
+      } catch (error) {
+        logError('图标转换过程中出错:', error)
+      }
     }
   },
   { immediate: true }
@@ -198,77 +267,163 @@ const openTool = async (toolId: string) => {
   await launchTool(tool, showConfirm)
 }
 
-const openWiki = async (wikiUrl?: string, toolId?: string, toolName?: string) => {
-  const invoker = getTauriInvoke()
-  
+// Wiki 模态框状态（用于右上角 Wiki 按钮）
+const wikiModalVisible = ref(false)
+const wikiModalFilePath = ref<string | undefined>(undefined)
+const wikiModalToolId = ref<string | undefined>(undefined)
+const wikiModalToolName = ref<string | undefined>(undefined)
+
+// 保存 Wiki 模态框状态到 sessionStorage
+const saveWikiModalState = () => {
   try {
-    // 确保 Wiki 服务器已启动
-    if (invoker) {
-      try {
-        await invoker('start_wiki_server')
-      } catch (err) {
-        // 服务器可能已经在运行，忽略错误
-      }
+    const state = {
+      visible: wikiModalVisible.value,
+      filePath: wikiModalFilePath.value,
+      toolId: wikiModalToolId.value,
+      toolName: wikiModalToolName.value,
     }
-    
-    let finalUrl = wikiUrl
-    
-    // 如果没有提供 wikiUrl，尝试根据工具 ID 或名称自动查找
-    if (!finalUrl && invoker && (toolId || toolName)) {
-      try {
-        const found = await invoker<{ path: string } | null>('find_wiki_for_tool', {
-          params: {
-            toolId: toolId || '',
-            toolName: toolName || undefined,
-          }
-        })
-        if (found && found.path) {
-          finalUrl = `http://127.0.0.1:8777/file/${found.path}`
-        } else {
-          // 如果没找到，打开 Wiki 首页
-          finalUrl = 'http://127.0.0.1:8777'
-        }
-      } catch (err) {
-        logError('查找 Wiki 文件失败:', err)
-        // 失败时打开 Wiki 首页
-        finalUrl = 'http://127.0.0.1:8777'
+    sessionStorage.setItem('wiki-modal-state', JSON.stringify(state))
+  } catch (err) {
+    warn('保存 Wiki 模态框状态失败:', err)
+  }
+}
+
+// 从 sessionStorage 恢复 Wiki 模态框状态
+const restoreWikiModalState = async () => {
+  try {
+    const saved = sessionStorage.getItem('wiki-modal-state')
+    if (saved) {
+      const state = JSON.parse(saved)
+      if (state.visible) {
+        wikiModalFilePath.value = state.filePath
+        wikiModalToolId.value = state.toolId
+        wikiModalToolName.value = state.toolName
+        wikiModalVisible.value = true
+        debug('已恢复 Wiki 模态框状态:', state)
       }
-    } else if (!finalUrl) {
-      // 如果都没有，打开 Wiki 首页
-      finalUrl = 'http://127.0.0.1:8777'
-    }
-    
-    // 如果是相对路径，转换为完整 URL
-    if (finalUrl && !finalUrl.startsWith('http')) {
-      if (finalUrl.startsWith('/')) {
-        finalUrl = `http://127.0.0.1:8777/file${finalUrl}`
-      } else {
-        finalUrl = `http://127.0.0.1:8777/file/${finalUrl}`
-      }
-    }
-    
-    // 添加保存的主题参数（如果有）
-    if (finalUrl) {
-      const savedTheme = localStorage.getItem('wiki-theme')
-      if (savedTheme && savedTheme !== 'default') {
-        const urlObj = new URL(finalUrl)
-        urlObj.searchParams.set('theme', savedTheme)
-        finalUrl = urlObj.toString()
-      }
-      
-      // 使用 Tauri shell.open API 打开浏览器
-      const { openUrlInBrowser } = await import('../utils/tauri')
-      await openUrlInBrowser(finalUrl)
     }
   } catch (err) {
-    logError('打开 Wiki 失败:', err)
-    // 降级到 window.open
+    warn('恢复 Wiki 模态框状态失败:', err)
+  }
+}
+
+// 清除 Wiki 模态框状态
+const clearWikiModalState = () => {
+  try {
+    sessionStorage.removeItem('wiki-modal-state')
+  } catch (err) {
+    warn('清除 Wiki 模态框状态失败:', err)
+  }
+}
+
+// 监听模态框可见性变化，保存状态
+watch(wikiModalVisible, (visible) => {
+  if (visible) {
+    saveWikiModalState()
+  } else {
+    clearWikiModalState()
+  }
+})
+
+// 监听模态框参数变化，保存状态
+watch([wikiModalFilePath, wikiModalToolId, wikiModalToolName], () => {
+  if (wikiModalVisible.value) {
+    saveWikiModalState()
+  }
+})
+
+// 组件挂载时恢复 Wiki 模态框状态
+onMounted(async () => {
+  await restoreWikiModalState()
+})
+
+const openWiki = async (wikiUrl?: string, toolId?: string, toolName?: string) => {
+  // 调试代码已注释
+  // console.log('========== openWiki 开始 ==========')
+  // console.log('openWiki 被调用:', { wikiUrl, toolId, toolName })
+  debug('openWiki 被调用')
+  const invoker = getTauriInvoke()
+  // console.log('Tauri invoker 状态:', { hasInvoker: !!invoker })
+  debug('Tauri invoker 状态:', { hasInvoker: !!invoker })
+  
+  try {
+    // 解析文件路径（如果提供了 wikiUrl）
+    let filePath: string | undefined = undefined
     if (wikiUrl) {
-      const opened = window.open(wikiUrl, '_blank', 'noopener,noreferrer')
-      if (!opened) {
-        logError('浏览器阻止了弹窗')
+      debug('处理 wikiUrl:', wikiUrl)
+      // 如果是 HTTP URL，提取路径（兼容旧配置）
+      if (wikiUrl.startsWith('http://') || wikiUrl.startsWith('https://')) {
+        const url = new URL(wikiUrl)
+        if (url.pathname.startsWith('/file/')) {
+          filePath = url.pathname.substring(6) // 移除 '/file/'
+        } else {
+          // 如果是普通 HTTP URL，尝试提取路径部分
+          filePath = url.pathname.startsWith('/') ? url.pathname.substring(1) : url.pathname
+        }
+      } else {
+        // 直接使用提供的相对路径（如 tools/tool-name.md）
+        // 规范化路径：将反斜杠转换为正斜杠，移除 wiki\ 或 wiki/ 前缀
+        let normalizedPath = wikiUrl.trim().replace(/\\/g, '/')
+        // 移除开头的 wiki/ 或 wiki\ 前缀（如果存在）
+        if (normalizedPath.toLowerCase().startsWith('wiki/')) {
+          normalizedPath = normalizedPath.substring(5)
+        }
+        filePath = normalizedPath
+        debug('规范化后的 Wiki 路径:', { original: wikiUrl, normalized: filePath })
       }
     }
+    
+    // 如果没有提供文件路径，尝试根据工具 ID 或名称自动查找
+    if (!filePath && (toolId || toolName) && invoker) {
+      debug('尝试自动查找 Wiki 文件:', { toolId, toolName })
+      try {
+        const found = await invoker('find_wiki_for_tool', {
+          tool_id: toolId || '',
+          tool_name: toolName || undefined,
+        }) as { path: string } | null
+        if (found && found.path) {
+          filePath = found.path
+          debug('自动查找到 Wiki 文件:', filePath)
+        } else {
+          debug('未找到匹配的 Wiki 文件')
+        }
+      } catch (err) {
+        debug('查找 Wiki 文件失败:', err)
+        // 如果查找失败，继续打开模态框（显示首页）
+      }
+    }
+    
+    // console.log('========== openWiki 准备打开模态框 ==========')
+    // console.log('打开 Wiki 模态框:', { 
+    //   filePath, 
+    //   toolId, 
+    //   toolName,
+    //   wikiModalVisible: wikiModalVisible.value,
+    //   wikiModalFilePath: wikiModalFilePath.value
+    // })
+    debug('准备打开 Wiki 模态框')
+    
+    // 打开 Wiki 模态框，并设置对应的文件路径和工具信息
+    // 这样 WikiView 会自动加载对应的文章
+    wikiModalFilePath.value = filePath
+    wikiModalToolId.value = toolId
+    wikiModalToolName.value = toolName
+    // console.log('设置模态框参数后:', { 
+    //   wikiModalFilePath: wikiModalFilePath.value,
+    //   wikiModalToolId: wikiModalToolId.value,
+    //   wikiModalToolName: wikiModalToolName.value
+    // })
+    debug('设置模态框参数')
+    wikiModalVisible.value = true
+    // console.log('模态框已打开:', { wikiModalVisible: wikiModalVisible.value })
+    debug('模态框已打开')
+    saveWikiModalState()
+    // console.log('========== openWiki 完成 ==========')
+    debug('openWiki 完成')
+  } catch (err) {
+    logError('========== openWiki 失败 ==========')
+    logError('打开 Wiki 失败:', err)
+    showConfirm('错误', `打开 Wiki 失败: ${err instanceof Error ? err.message : String(err)}`, () => {}, 'danger')
   }
 }
 
@@ -277,41 +432,12 @@ const goSettings = () => {
 }
 
 const openWikiHome = async () => {
-  try {
-    const invoker = getTauriInvoke()
-    
-    // 尝试启动 Wiki 服务器（如果后端支持）
-    if (invoker) {
-      try {
-        await invoker('start_wiki_server')
-      } catch {
-        // 静默处理错误，允许继续打开浏览器
-      }
-    }
-    
-    // 构建 URL，添加保存的主题参数（如果有）
-    let url = 'http://127.0.0.1:8777'
-    const savedTheme = localStorage.getItem('wiki-theme')
-    if (savedTheme && savedTheme !== 'default') {
-      const urlObj = new URL(url)
-      urlObj.searchParams.set('theme', savedTheme)
-      url = urlObj.toString()
-    }
-    
-    // 使用 Tauri shell.open API 打开浏览器
-    const { openUrlInBrowser } = await import('../utils/tauri')
-    await openUrlInBrowser(url)
-  } catch (err) {
-    if (import.meta.env.DEV) {
-      // eslint-disable-next-line no-console
-      console.error('打开 Wiki 失败:', err)
-    }
-    // 降级到 window.open
-    const opened = window.open('http://127.0.0.1:8777', '_blank', 'noopener,noreferrer')
-    if (!opened) {
-      showConfirm('提示', '浏览器阻止了弹窗，请允许弹窗后重试', () => {}, 'warning')
-    }
-  }
+  // 打开 Wiki 模态框（右上角按钮使用模态框）
+  wikiModalFilePath.value = undefined
+  wikiModalToolId.value = undefined
+  wikiModalToolName.value = undefined
+  wikiModalVisible.value = true
+  saveWikiModalState()
 }
 
 const onOverlayClick = (toolId: string) => {
@@ -443,44 +569,75 @@ const saveSub = () => {
     subForm.value.id = `sub_${Date.now()}`
   }
   const idx = list.findIndex((s) => s.id === subForm.value.id)
-  if (idx >= 0 && list[idx]) {
-    // 更新现有子分类
-    const existing = list[idx]
-    existing.name = subForm.value.name.trim()
-    existing.description = subForm.value.description.trim() || undefined
-  } else {
-    // 创建新子分类
-    list.push({
-      id: subForm.value.id,
-      name: subForm.value.name.trim(),
-      description: subForm.value.description.trim() || undefined,
-      tools: [],
-    })
-  }
-  selectedSubId.value = subForm.value.id
-  isNewSub.value = false
-  showSubModal.value = false
   
   // 确保修改被 Vue 响应式系统检测到
   if (category.value) {
     const categoryIndex = categoriesData.value.findIndex(c => c.id === category.value?.id)
     if (categoryIndex >= 0 && categoriesData.value[categoryIndex]) {
-      // 创建一个新对象来触发响应式更新
       const existing = categoriesData.value[categoryIndex]
+      // 创建新的 subCategories 数组，确保引用改变
+      let newSubCategories: SubCategory[]
+      if (idx >= 0) {
+        // 更新现有子分类
+        newSubCategories = existing.subCategories.map(sub => {
+          if (sub.id === subForm.value.id) {
+            return {
+              ...sub,
+              name: subForm.value.name.trim(),
+              description: subForm.value.description.trim() || undefined,
+            }
+          }
+          return { ...sub }
+        })
+      } else {
+        // 创建新子分类
+        newSubCategories = [
+          ...existing.subCategories,
+          {
+            id: subForm.value.id,
+            name: subForm.value.name.trim(),
+            description: subForm.value.description.trim() || undefined,
+            tools: [],
+          }
+        ]
+      }
+      
+      // 创建新的分类对象，确保所有引用都改变
       categoriesData.value[categoryIndex] = {
         id: existing.id,
         name: existing.name,
         label: existing.label,
         description: existing.description,
-        subCategories: existing.subCategories,
+        subCategories: newSubCategories,
       }
+      
+      // 同步更新本地引用（用于 UI 显示）
+      if (idx >= 0 && list[idx]) {
+        list[idx] = {
+          ...list[idx],
+          name: subForm.value.name.trim(),
+          description: subForm.value.description.trim() || undefined,
+        }
+      } else {
+        list.push({
+          id: subForm.value.id,
+          name: subForm.value.name.trim(),
+          description: subForm.value.description.trim() || undefined,
+          tools: [],
+        })
+      }
+      
+      debug('子分类已保存，已触发响应式更新，等待自动同步到配置文件...', {
+        subId: subForm.value.id,
+        subName: subForm.value.name,
+        categoryId: category.value.id,
+      })
     }
   }
   
-  if (import.meta.env.DEV) {
-    // eslint-disable-next-line no-console
-    console.log('子分类已保存，等待自动同步到配置文件...')
-  }
+  selectedSubId.value = subForm.value.id
+  isNewSub.value = false
+  showSubModal.value = false
 }
 
 const deleteSub = (id: string) => {
@@ -495,15 +652,23 @@ const deleteSub = (id: string) => {
     // 确保修改被 Vue 响应式系统检测到
     const categoryIndex = categoriesData.value.findIndex(c => c.id === category.value?.id)
     if (categoryIndex >= 0 && categoriesData.value[categoryIndex]) {
-      // 创建一个新对象来触发响应式更新
       const existing = categoriesData.value[categoryIndex]
+      // 创建新的 subCategories 数组，排除被删除的子分类
+      const newSubCategories = existing.subCategories.filter(sub => sub.id !== id)
+      
+      // 创建新的分类对象，确保所有引用都改变
       categoriesData.value[categoryIndex] = {
         id: existing.id,
         name: existing.name,
         label: existing.label,
         description: existing.description,
-        subCategories: existing.subCategories,
+        subCategories: newSubCategories,
       }
+      
+      debug('子分类已删除，已触发响应式更新，等待自动保存到配置文件...', {
+        subId: id,
+        categoryId: category.value.id,
+      })
     }
   }
 }
@@ -663,19 +828,28 @@ const saveTool = async () => {
         const autoIcon = await autoFetchIcon(toolForm.value.toolType, execPath)
         if (autoIcon) {
           finalIconUrl = autoIcon
-          if (import.meta.env.DEV) {
-            // eslint-disable-next-line no-console
-            console.log('自动获取图标成功:', { toolType: toolForm.value.toolType, execPath })
-          }
+          debug('自动获取图标成功:', { toolType: toolForm.value.toolType, execPath })
         }
       } catch (error) {
-        if (import.meta.env.DEV) {
-          // eslint-disable-next-line no-console
-          console.warn('自动获取图标失败:', error)
-        }
+        warn('自动获取图标失败:', error)
       }
     }
   }
+  
+  // 如果图标是 base64 数据 URL，保存到 .config/icons/ 目录并转换为相对路径
+  if (finalIconUrl && finalIconUrl.startsWith('data:image')) {
+    try {
+      const iconPath = await saveIconToCache(finalIconUrl)
+      finalIconUrl = iconPath
+      debug('图标已保存到缓存（.config/icons/ 目录）:', iconPath)
+    } catch (error) {
+      warn('保存图标到缓存失败，使用原始 base64:', error)
+      // 如果保存失败，继续使用 base64（向后兼容）
+    }
+  }
+  
+  // 不再自动转换路径格式，保留用户设置的原始路径
+  // 只有 base64 图标会被保存到缓存并转换为相对路径
   
   const base: ToolItem = {
     id: toolForm.value.id,
@@ -690,16 +864,13 @@ const saveTool = async () => {
   }
   
   // 调试信息
-  if (import.meta.env.DEV) {
-    // eslint-disable-next-line no-console
-    console.log('保存工具:', {
-      id: base.id,
-      name: base.name,
-      toolType: base.toolType,
-      execPath: base.execPath,
-      hasIcon: !!base.iconUrl,
-    })
-  }
+  debug('保存工具:', {
+    id: base.id,
+    name: base.name,
+    toolType: base.toolType,
+    execPath: base.execPath,
+    hasIcon: !!base.iconUrl,
+  })
   if (idx >= 0) {
     list[idx] = { ...list[idx], ...base }
   } else {
@@ -707,30 +878,61 @@ const saveTool = async () => {
   }
   
   // 确保修改被 Vue 响应式系统检测到
-  // 通过触发数组更新来确保 watch 能够捕获变化
+  // 通过创建新的数组和对象引用来触发深层 watch
   if (category.value) {
-    // 强制触发响应式更新
     const categoryIndex = categoriesData.value.findIndex(c => c.id === category.value?.id)
     if (categoryIndex >= 0 && categoriesData.value[categoryIndex]) {
-      // 创建一个新对象来触发响应式更新
       const existing = categoriesData.value[categoryIndex]
+      // 创建新的 subCategories 数组，确保工具数组的引用也改变
+      const newSubCategories = existing.subCategories.map(sub => {
+        if (sub.id === currentSub.value?.id) {
+          // 创建新的 tools 数组
+          let newTools: ToolItem[]
+          if (idx >= 0) {
+            // 更新现有工具
+            newTools = sub.tools.map(tool => 
+              tool.id === base.id ? base : { ...tool }
+            )
+          } else {
+            // 添加新工具
+            newTools = [...sub.tools, base]
+          }
+          return {
+            ...sub,
+            tools: newTools,
+          }
+        }
+        return { ...sub }
+      })
+      
+      // 创建新的分类对象，确保所有引用都改变
       categoriesData.value[categoryIndex] = {
         id: existing.id,
         name: existing.name,
         label: existing.label,
         description: existing.description,
-        subCategories: existing.subCategories,
+        subCategories: newSubCategories,
+      }
+      
+      debug('工具已保存，已触发响应式更新，等待自动同步到配置文件...', {
+        toolId: base.id,
+        toolName: base.name,
+        categoryId: category.value.id,
+      })
+      
+      // 直接触发保存，确保数据立即持久化（watch 作为备用）
+      try {
+        const { saveToolsData } = await import('../stores/categories')
+        await saveToolsData()
+        info('✅ 工具数据已立即保存到配置文件')
+      } catch (error) {
+        warn('立即保存失败，将依赖 watch 自动保存:', error)
       }
     }
   }
   
   editingToolId.value = null
   showToolModal.value = false
-  
-  if (import.meta.env.DEV) {
-    // eslint-disable-next-line no-console
-    console.log('工具已保存，等待自动同步到配置文件...')
-  }
 }
 
 const deleteTool = (id: string) => {
@@ -742,15 +944,33 @@ const deleteTool = (id: string) => {
     if (category.value) {
       const categoryIndex = categoriesData.value.findIndex(c => c.id === category.value?.id)
       if (categoryIndex >= 0 && categoriesData.value[categoryIndex]) {
-        // 创建一个新对象来触发响应式更新
         const existing = categoriesData.value[categoryIndex]
+        // 创建新的 subCategories 数组，确保工具数组的引用也改变
+        const newSubCategories = existing.subCategories.map(sub => {
+          if (sub.id === currentSub.value?.id) {
+            // 创建新的 tools 数组，排除被删除的工具
+            const newTools = sub.tools.filter(tool => tool.id !== id)
+            return {
+              ...sub,
+              tools: newTools,
+            }
+          }
+          return { ...sub }
+        })
+        
+        // 创建新的分类对象，确保所有引用都改变
         categoriesData.value[categoryIndex] = {
           id: existing.id,
           name: existing.name,
           label: existing.label,
           description: existing.description,
-          subCategories: existing.subCategories,
+          subCategories: newSubCategories,
         }
+        
+        debug('工具已删除，已触发响应式更新，等待自动保存到配置文件...', { 
+          toolId: id, 
+          categoryId: category.value.id 
+        })
       }
     }
   }
@@ -780,10 +1000,7 @@ const selectJarFile = async () => {
           }
         }
       } catch (err) {
-        if (import.meta.env.DEV) {
-          // eslint-disable-next-line no-console
-          console.warn('解析文件路径失败，使用原始路径:', err)
-        }
+        warn('解析文件路径失败，使用原始路径:', err)
       }
     }
     
@@ -819,10 +1036,7 @@ const selectHtmlFile = async () => {
           }
         }
       } catch (err) {
-        if (import.meta.env.DEV) {
-          // eslint-disable-next-line no-console
-          console.warn('解析文件路径失败，使用原始路径:', err)
-        }
+        warn('解析文件路径失败，使用原始路径:', err)
       }
     }
     
@@ -946,30 +1160,18 @@ const autoFetchIconOnInput = async () => {
   
   isFetchingIcon.value = true
   try {
-    if (import.meta.env.DEV) {
-      // eslint-disable-next-line no-console
-      console.log('开始自动获取图标:', { toolType: toolForm.value.toolType, execPath })
-    }
+    debug('开始自动获取图标:', { toolType: toolForm.value.toolType, execPath })
     const autoIcon = await autoFetchIcon(toolForm.value.toolType, execPath)
     if (autoIcon) {
       toolForm.value.iconUrl = autoIcon
       autoFetchedIconPath.value = execPath
       isManualIcon.value = false
-      if (import.meta.env.DEV) {
-        // eslint-disable-next-line no-console
-        console.log('自动获取图标成功（输入时）:', { toolType: toolForm.value.toolType, execPath, iconLength: autoIcon.length })
-      }
+      debug('自动获取图标成功（输入时）:', { toolType: toolForm.value.toolType, execPath, iconLength: autoIcon.length })
     } else {
-      if (import.meta.env.DEV) {
-        // eslint-disable-next-line no-console
-        console.warn('自动获取图标返回 null:', { toolType: toolForm.value.toolType, execPath })
-      }
+      warn('自动获取图标返回 null:', { toolType: toolForm.value.toolType, execPath })
     }
   } catch (error) {
-    if (import.meta.env.DEV) {
-      // eslint-disable-next-line no-console
-      console.error('自动获取图标失败（输入时）:', error, { toolType: toolForm.value.toolType, execPath })
-    }
+    logError('自动获取图标失败（输入时）:', error, { toolType: toolForm.value.toolType, execPath })
   } finally {
     isFetchingIcon.value = false
   }
@@ -1026,8 +1228,9 @@ const selectLocalImage = async () => {
     // 处理图片（裁剪、压缩）
     const processedImage = await processImage(file, 160, 0.9)
     
-    // 更新表单
+    // 更新表单（保存时会自动保存到 .config/icons/ 目录）
     toolForm.value.iconUrl = processedImage
+    debug('用户上传自定义图标，已处理为 base64，保存时将保存到 .config/icons/ 目录')
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : '图片处理失败'
     showConfirm('错误', `图片处理失败：${errorMessage}`, () => {}, 'warning')
@@ -1058,10 +1261,7 @@ const selectExecutableFile = async () => {
           }
         }
       } catch (err) {
-        if (import.meta.env.DEV) {
-          // eslint-disable-next-line no-console
-          console.warn('解析文件路径失败，使用原始路径:', err)
-        }
+        warn('解析文件路径失败，使用原始路径:', err)
       }
     }
     
@@ -1490,8 +1690,8 @@ const onConfirm = () => {
                   >
                   <div class="tool-icon-wrapper">
                     <img
-                      v-if="(tool as ToolItem).iconUrl && !(tool as ToolItem).iconUrl?.startsWith('file://')"
-                      :src="(tool as ToolItem).iconUrl"
+                      v-if="getToolIconUrl(tool as ToolItem) && !getToolIconUrl(tool as ToolItem)?.startsWith('file://') && !getToolIconUrl(tool as ToolItem)?.startsWith('icons/') && !getToolIconUrl(tool as ToolItem)?.startsWith('.config/icons/')"
+                      :src="getToolIconUrl(tool as ToolItem)"
                       :alt="(tool as ToolItem).name"
                       class="tool-icon-img"
                       @error="handleIconError($event)"
@@ -1518,8 +1718,8 @@ const onConfirm = () => {
                 >
                   <div class="tool-icon-wrapper">
                     <img
-                      v-if="tool.iconUrl"
-                      :src="tool.iconUrl"
+                      v-if="getToolIconUrl(tool) && !getToolIconUrl(tool)?.startsWith('file://') && !getToolIconUrl(tool)?.startsWith('icons/') && !getToolIconUrl(tool)?.startsWith('.config/icons/')"
+                      :src="getToolIconUrl(tool)"
                       :alt="tool.name"
                       class="tool-icon-img"
                       @error="handleIconError($event)"
@@ -1554,8 +1754,8 @@ const onConfirm = () => {
                   >
                     <div class="tool-icon-wrapper-list">
                       <img
-                        v-if="(tool as ToolItem).iconUrl && !(tool as ToolItem).iconUrl?.startsWith('file://')"
-                        :src="(tool as ToolItem).iconUrl"
+                        v-if="getToolIconUrl(tool as ToolItem) && !getToolIconUrl(tool as ToolItem)?.startsWith('file://') && !getToolIconUrl(tool as ToolItem)?.startsWith('icons/') && !getToolIconUrl(tool as ToolItem)?.startsWith('.config/icons/')"
+                        :src="getToolIconUrl(tool as ToolItem)"
                         :alt="(tool as ToolItem).name"
                         class="tool-icon-img"
                         @error="handleIconError($event)"
@@ -1582,8 +1782,8 @@ const onConfirm = () => {
                 >
                   <div class="tool-icon-wrapper-list">
                     <img
-                      v-if="tool.iconUrl"
-                      :src="tool.iconUrl"
+                      v-if="getToolIconUrl(tool) && !getToolIconUrl(tool)?.startsWith('file://') && !getToolIconUrl(tool)?.startsWith('icons/') && !getToolIconUrl(tool)?.startsWith('.config/icons/')"
+                      :src="getToolIconUrl(tool)"
                       :alt="tool.name"
                       class="tool-icon-img"
                       @error="handleIconError($event)"
@@ -1619,8 +1819,8 @@ const onConfirm = () => {
                   >
                     <div class="tool-icon-wrapper-list">
                       <img
-                        v-if="(tool as ToolItem).iconUrl && !(tool as ToolItem).iconUrl?.startsWith('file://')"
-                        :src="(tool as ToolItem).iconUrl"
+                        v-if="getToolIconUrl(tool as ToolItem) && !getToolIconUrl(tool as ToolItem)?.startsWith('file://') && !getToolIconUrl(tool as ToolItem)?.startsWith('icons/') && !getToolIconUrl(tool as ToolItem)?.startsWith('.config/icons/')"
+                        :src="getToolIconUrl(tool as ToolItem)"
                         :alt="(tool as ToolItem).name"
                         class="tool-icon-img"
                         @error="handleIconError($event)"
@@ -1647,8 +1847,8 @@ const onConfirm = () => {
                 >
                   <div class="tool-icon-wrapper-list">
                     <img
-                      v-if="tool.iconUrl"
-                      :src="tool.iconUrl"
+                      v-if="getToolIconUrl(tool) && !getToolIconUrl(tool)?.startsWith('file://') && !getToolIconUrl(tool)?.startsWith('icons/') && !getToolIconUrl(tool)?.startsWith('.config/icons/')"
+                      :src="getToolIconUrl(tool)"
                       :alt="tool.name"
                       class="tool-icon-img"
                       @error="handleIconError($event)"
@@ -1915,12 +2115,13 @@ const onConfirm = () => {
           </label>
         </div>
         <label class="field">
-          <span class="field-label">Wiki URL（可选）</span>
+          <span class="field-label">Wiki 文件路径（可选）</span>
           <input
             v-model="toolForm.wikiUrl"
             class="field-input"
-            placeholder="https://wiki.example.com/tool-name 或留空"
+            placeholder="例如：tools/test-case-1.md 或留空自动查找"
           />
+          <span class="field-hint">输入 Wiki 文件的相对路径（相对于 wiki 目录，如 tools/test-case-1.md），或留空让系统根据工具名称自动查找。注意：不要包含 wiki\ 或 wiki/ 前缀</span>
         </label>
         <div class="modal-form-actions">
           <button type="button" class="btn primary" @click="saveTool">保存</button>
@@ -1943,6 +2144,16 @@ const onConfirm = () => {
         <span class="copyright">© 2025 By 序章</span>
       </div>
     </footer>
+    
+    <!-- Wiki 模态框（用于右上角 Wiki 按钮） -->
+    <WikiModal
+      v-model:visible="wikiModalVisible"
+      :file-path="wikiModalFilePath"
+      :tool-id="wikiModalToolId"
+      :tool-name="wikiModalToolName"
+      :title="wikiModalToolName ? `${wikiModalToolName} - Wiki` : 'Wiki 文档'"
+      @close="clearWikiModalState"
+    />
   </div>
 </template>
 
@@ -3020,6 +3231,25 @@ const onConfirm = () => {
   color: #9ca3af;
   letter-spacing: 0.05em;
 }
+
+/* Wiki 模态框样式 */
+:deep(.wiki-modal .modal-container) {
+  width: 90vw;
+  max-width: 1200px;
+  height: 85vh;
+  max-height: 900px;
+  display: flex;
+  flex-direction: column;
+}
+
+:deep(.wiki-modal .modal-body) {
+  flex: 1;
+  overflow: hidden;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 </style>
 
 

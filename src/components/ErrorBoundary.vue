@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onErrorCaptured, provide, type ComponentPublicInstance } from 'vue'
+import { error as logError } from '../utils/logger'
 
 interface Props {
   fallback?: string
@@ -16,8 +17,7 @@ const error = ref<Error | null>(null)
 onErrorCaptured((err: Error, instance: ComponentPublicInstance | null, info: string) => {
   hasError.value = true
   error.value = err
-  // eslint-disable-next-line no-console
-  console.error('ErrorBoundary caught an error:', err, info)
+  logError('ErrorBoundary caught an error:', err, info)
   
   // 可以在这里发送错误报告到后端
   // reportError(err, info)
