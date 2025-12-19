@@ -6,6 +6,7 @@ mod launcher;
 mod icon_extractor;
 mod file_ops;
 mod wiki;
+mod ai_service;
 
 // Wiki 命令
 mod wiki_commands {
@@ -62,7 +63,12 @@ pub fn run() {
         wiki_commands::search_wiki,
         wiki_commands::get_wiki_dir,
         wiki_commands::find_wiki_for_tool,
+      // AI Gateway 服务
+        ai_service::start_ai_service,
+        ai_service::stop_ai_service,
+        ai_service::check_ai_service_status,
     ])
+    .manage(ai_service::AIServiceState::default())
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
 }
