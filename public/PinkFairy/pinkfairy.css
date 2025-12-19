@@ -1,0 +1,526 @@
+/*
+ *  Typora 主题 - PinkFaiey
+ *  作者 - ShimuGuyue
+ *  GitHub - https://github.com/ShimuGuyue/typora-theme-PinkFairy
+ *
+ ***************************************************
+ *
+ *  本主题主要基于 Fugu 主题修改而来
+ *  Fugu 主题 - https://github.com/sinlatansen/typora-theme-Fugu
+ *
+**/
+
+/*
+  *=============================
+  * 主题全局变量
+  *=============================
+*/
+
+:root {
+/** 颜色 */
+  --color-pink-soft:         #FF9EC8;       /* 柔粉 */
+  --color-pink-hot:          #FF77CC;       /* 艳粉 */
+  --color-pink-light:        #ffaaff;       /* 浅粉 */
+  --color-pink-bright:       #FFEEF8;       /* 亮粉 */
+  --color-pink-peach:        #F39ACD;       /* 桃粉 */
+  --color-pink-tender:       #FFF0F5;       /* 嫩粉 */
+  --color-purple-herrscher : #6D6AA7;       /* 侵蚀紫 */
+
+/** 字号 */
+  --fontsize-title1: 2.50rem;
+  --fontsize-title2: 2.00rem;
+  --fontsize-title3: 1.80rem;
+  --fontsize-title4: 1.55rem;
+  --fontsize-title5: 1.35rem;
+  --fontsize-title6: 1.25rem;
+  --fontsize-normal: var(--fontsize-title6);
+}
+
+/*
+  *=============================
+  * 标题样式
+  *=============================
+*/
+
+/** 标题字体和颜色 */
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3,
+.markdown-body h4,
+.markdown-body h5,
+.markdown-body h6 {
+  font-family: "微软雅黑", "Microsoft YaHei", sans-serif;          /* 标题字体 */
+  margin: 0.8em 0 0.8em;            /* 标题外边距 */
+  color: var(--color-pink-soft);    /* 标题颜色 */
+}
+
+/** 标题标识符 */
+.markdown-body h1::before {
+  content: "❀ ";       /* 一级标题前缀 */
+}
+.markdown-body h1::after {
+  content: " ❀";       /* 一级标题后缀 */
+}
+.markdown-body h2::before {
+  content: "➳ ";       /* 二级标题前缀 */
+}
+.markdown-body h2::after {
+  content: " ➳";       /* 二级标题后缀 */
+}
+.markdown-body h3::before {
+  content: "☙ ";       /* 三级标题前缀 */
+}
+.markdown-body h3::after {
+  content: " ☙";       /* 三级标题后缀 */
+}
+.markdown-body h4::before {
+  content: " ♥ ";      /* 四级标题前缀 */
+}
+.markdown-body h4::after {
+  content: " ♥";       /* 四级标题后缀 */
+}
+.markdown-body h5::before {
+  content: " ♪ ";      /* 五级标题前缀 */
+}
+.markdown-body h5::after {
+  content: " ♪";       /* 五级标题后缀 */
+}
+.markdown-body h6::before {
+  content: "❖ ";      /* 六级标题前缀 */
+}
+.markdown-body h6::after {
+  content: " ❖";       /* 六级标题后缀 */
+}
+
+/** 标题字号 */
+.markdown-body h1 {
+  font-size: var(--fontsize-title1);
+}
+.markdown-body h2 {
+  font-size: var(--fontsize-title2);
+}
+.markdown-body h3 {
+  font-size: var(--fontsize-title3);
+}
+.markdown-body h4 {
+  font-size: var(--fontsize-title4);
+}
+.markdown-body h5 {
+  font-size: var(--fontsize-title5);
+}
+.markdown-body h6 {
+  font-size: var(--fontsize-title6);
+}
+
+/*
+  *=============================
+  * 分割线样式
+  *=============================
+*/
+
+.markdown-body hr {
+  background-image: repeating-linear-gradient(  
+    -45deg,
+    var(--color-pink-soft),
+    var(--color-pink-soft) 6px,
+    transparent 8px,
+    transparent 12px
+  );                /* 斜向粉红条纹 */
+  height: 3px;      /* 分割线高度 */
+  margin: 25px 0;  /* 分割线外边距 */
+  border: none;     /* 移除默认边框 */
+}
+
+/*
+  *=============================
+  *文本排版样式
+  *=============================
+*/
+
+/** 常规文本样式 */
+.markdown-body {
+  max-width: 1000px;                    /* 最大宽度 */
+  overflow-wrap: break-word;            /* 自动换行 */
+  margin-bottom: 60rem;                 /* 底部空白 */
+  font-size: var(--fontsize-normal);    /* 字号 */
+  line-height: 1.6;                     /* 行高 */
+  font-family: "仿宋", "FangSong", serif;                  /* 字体 */
+  font-weight: bold;                    /* 加粗 */
+}
+
+/** 斜体文本样式 */
+.markdown-body em {
+  font-family: "Consolas", "华文行楷", "STXingkai", serif;    /* 字体 */
+  font-size: var(--fontsize-normal);      /* 字号 */
+  margin-right: 0.3em;                    /* 与右侧文本距离 */
+}
+
+/** 加粗文本样式 */
+.markdown-body strong {
+  font-size: var(--fontsize-normal);  /* 字号 */
+  color: var(--color-pink-hot);       /* 颜色 */
+}
+
+/** 链接文本样式 */
+.markdown-body a {
+  color: var(--color-pink-light);     /* 颜色 */
+}
+.markdown-body p a,
+.markdown-body .md-p a,
+.markdown-body .md-heading a {
+  word-wrap: break-word;              /* 链接自动换行 */
+  text-decoration: underline solid;   /* 链接文本下划线 */
+  margin: 2px;                        /* 链接文本侧边距 */
+}
+
+/** 高亮文本样式 */
+.markdown-body mark {
+  background: var(--color-pink-bright);   /* 高亮背景颜色 */
+  padding: 1px 0.15rem;                   /* 高亮内边距 */
+  color: var(--color-pink-hot);           /* 高亮字体颜色 */
+}
+
+/** 删除文本样式 */
+.markdown-body del, 
+.markdown-body s {
+  background-color: var(--color-purple-herrscher);  /* 删除元素背景颜色 */
+  color: var(--color-purple-herrscher);             /* 文本颜色与背景颜色相同，用于隐藏文本 */
+  border: 1px solid var(--color-purple-herrscher);  /* 边框 */
+  border-radius: 3px;                               /* 圆角 */
+  text-decoration: none;                            /* 移除删除线 */
+  transition: all 0.2s ease;                        /* 属性变化过渡时间 */
+}
+/* 鼠标悬停状态 */
+.markdown-body del:hover, 
+.markdown-body s:hover {
+  background-color: var(--color-pink-bright);   /* 悬停背景颜色 */
+  color: var(--color-pink-soft);                /* 悬停文本颜色 */
+  border: 1px dashed var(--color-pink-soft);    /* 粉色虚线边框 */
+}
+
+/** 列表样式 */
+.markdown-body ul,
+.markdown-body ol {
+  list-style: none;                               /* 移除默认符号 */
+  padding-left: calc(2 * var(--fontsize-normal)); /* 缩进距离 */
+  position: relative;                             /* 相对定位，用于符号定位 */
+}
+/* 无序（外层） */
+.markdown-body ul li {
+  position: relative;                             /* 相对定位 */
+}
+.markdown-body ul li::before {
+  content: "❀";                            /* 符号 */
+  position: absolute;                       /* 符号位置 */
+  left: calc(-2 * var(--fontsize-normal));  /* 符号与文本距离 */
+  width: calc(2 * var(--fontsize-normal));  /* 符号区域宽度 */
+  text-align: center;                       /* 符号区域对齐方式 */
+  color: var(--color-pink-soft);            /* 符号颜色 */
+}
+/* 无序（内层） */
+.markdown-body ul ul li::before,
+.markdown-body ol ul li::before {
+  content: "➳";                            /* 符号 */
+  position: absolute;                       /* 符号位置 */
+  left: calc(-2 * var(--fontsize-normal));  /* 符号与文本距离 */
+  width: calc(2 * var(--fontsize-normal));  /* 符号区域宽度 */
+  text-align: center;                       /* 符号区域对齐方式 */
+  color: var(--color-pink-soft);            /* 符号颜色 */
+}
+
+/* 有序（外层） */
+.markdown-body ol {
+  counter-reset: ol-count;      /* 数字计数器 */
+}
+.markdown-body ol li {
+  position: relative;           /* 符号定位 */
+  counter-increment: ol-count;  /* 递增数字计数器 */
+}
+.markdown-body ol li::before {
+  content: counter(ol-count) ".";           /* 显示计数器数字 */
+  position: absolute;                       /* 符号定位 */
+  left: calc(-4 * var(--fontsize-normal));  /* 符号与文本距离 */
+  width: calc(4 * var(--fontsize-normal));  /* 符号区域宽度 */
+  text-align: right;                        /* 符号区域对齐方式 */
+  color: var(--color-pink-soft);            /* 符号颜色 */
+}
+/* 有序（内层） */
+.markdown-body ul ol,
+.markdown-body ol ol {
+  counter-reset: xl-ol-count;   /* 数字计数器 */
+}
+.markdown-body ul ol li,
+.markdown-body ol ol li {
+  position: relative;             /* 符号定位 */
+  counter-increment: xl-ol-count; /* 递增罗马计数器 */
+}
+.markdown-body ul ol li::before,
+.markdown-body ol ol li::before {
+  content: counter(xl-ol-count, lower-roman) ".";   /* 显示计数器数字 */
+  position: absolute;                               /* 符号定位 */
+  left: calc(-4 * var(--fontsize-normal));          /* 符号与文本距离 */
+  width: calc(4 * var(--fontsize-normal));          /* 符号区域宽度 */
+  text-align: right;                                /* 对齐方式 */
+  color: var(--color-pink-soft);                    /* 数字颜色 */
+}
+
+/** 引用块文本样式 */
+.markdown-body blockquote {
+  display: block;                                   /* 独立区块 */
+  font-size: 1em;                                   /* 字体大小 */
+  overflow: visible;                                /* 溢出时完整显示 */
+  border-left: 10px solid var(--color-pink-light);  /* 引用块左侧条框 */
+  padding: 15px 30px 15px 20px;                     /* 引用块内边距 */
+  margin-bottom: 20px;                              /* 引用块底部外边距 */
+  margin-top: 20px;                                 /* 引用块顶部外边距 */
+  background-color: var(--color-pink-bright);       /* 引用块背景 */
+  color: var(--color-pink-hot);                     /* 引用块文本颜色 */
+  border-radius: 8px;                               /* 引用块圆角 */
+}
+
+/*
+  *=============================
+  * 代码块样式
+  *=============================
+*/
+
+/** 行内代码样式 */
+.markdown-body code {
+  color: var(--color-pink-peach);                 /* 代码文字颜色 */
+  font-size: var(--fontsize-normal);              /* 字号 */
+  word-wrap: break-word;                          /* 换行时长单词在任意字符间断行 */
+  margin: 1px;                                    /* 外边距 */
+  background-color: var(--color-pink-bright);     /* 背景颜色 */
+  font-family: "仿宋", "FangSong", serif;                            /* 字体 */
+  word-break: break-all;                          /* 允许在任意字符间断词，防止溢出 */
+  padding: 2px 4px;                               /* 内边距 */
+  border-radius: 3px;                             /* 圆角 */
+}
+
+/** 代码块样式 */
+.markdown-body pre {
+  font-family: "Consolas", "Courier New", monospace;                        /* 字体 */
+  font-size: var(--fontsize-title5);          /* 字号 */
+  line-height: 2rem;                          /* 行高 */
+  background: var(--color-pink-tender);       /* 背景 */
+  border: 1px solid var(--color-pink-soft);   /* 边框 */
+  border-radius: 12px;                        /* 圆角 */
+  padding: 1rem 0 1rem 1rem;                  /* 内边距 */
+  margin: 1rem 0;                             /* 外边距 */
+  position: relative;                         /* 位置 */
+  overflow-x: auto;                          /* 水平滚动 */
+}
+
+.markdown-body pre code {
+  background: transparent;                    /* 代码块内代码背景透明 */
+  padding: 0;                                /* 移除内边距 */
+  margin: 0;                                 /* 移除外边距 */
+  border-radius: 0;                          /* 移除圆角 */
+  word-break: normal;                        /* 正常换行 */
+  overflow-wrap: normal;                     /* 正常换行 */
+}
+
+/*
+  *=============================
+  * 表格样式
+  *=============================
+*/
+
+/* 表格容器样式 */
+.markdown-body table {
+  text-align: left;              /* 对齐方式 */
+  width: 100%;                   /* 表格宽度 */
+  border-collapse: collapse;     /* 边框合并 */
+  margin: 1rem 0;                /* 外边距 */
+}
+
+/* 表头单元格和普通单元格共用样式 */
+.markdown-body table tr th,
+.markdown-body table tr td {
+  font-family: "楷体", "KaiTi", "Consolas", monospace;                              /* 字体 */
+  font-size: var(--fontsize-normal);                /* 字号 */
+  border: 1px solid var(--color-pink-hot);          /* 单元格边框线 */
+  padding: 5px calc(0.5 * var(--fontsize-normal));  /* 单元格内边距 */
+  min-width: calc(11.5 * var(--fontsize-normal));   /* 最小宽度 */
+  vertical-align: top;                              /* 对齐方式 */
+}
+
+/* 表头单元格样式 */
+.markdown-body table tr th {
+  font-size: var(--fontsize-title5);            /* 字号 */
+  font-weight: bold;                            /* 文本加粗 */
+  color: var(--color-pink-hot);                 /* 文字颜色 */
+  background-color: var(--color-pink-bright);   /* 背景颜色 */
+}
+
+/*
+  *=============================
+  *目录样式
+  *=============================
+*/
+
+/* 文本格式 */
+.markdown-body .md-toc-content {
+  font-family: "楷体", "KaiTi", "Consolas", monospace;    /* 字体 */
+  font-size: var(--fontsize-title5);  /* 字号 */
+}
+
+/* 目录样式 */
+.markdown-body div.md-toc-tooltip {
+  font-family: "楷体", "KaiTi", "Consolas", monospace;            /* 字体 */
+  font-size: var(--fontsize-title5);          /* 字号 */
+  color: var(--color-pink-hot);               /* 文字颜色 */
+  position: static;                           /* 定位方式 */
+  margin-top: 10px;                           /* 上边距 */
+  border-top: none;                           /* 去除上边框 */
+}
+
+/* 目录获得焦点时的样式 */
+.markdown-body .md-toc:focus .md-toc-content {
+  border-radius: 0.5rem;                      /* 圆角边框 */
+  border-color: var(--color-pink-peach);      /* 边框颜色 */
+  background-color: var(--color-pink-bright); /* 背景颜色 */
+}
+
+/*
+ *=============================
+ * 图片样式
+ *=============================
+*/
+
+/* 基础样式 */
+.markdown-body img {
+  margin: 0 auto;         /* 水平居中 */
+  max-width: 90%;         /* 图片最大宽度 */
+  display: block;         /* 块级元素，独占一行 */
+  border-radius: 1rem;    /* 圆角 */
+  background: none;       /* 移除背景 */
+  border: none;           /* 移除边框 */
+  box-shadow: 
+    -4px 0 8px var(--color-pink-light),  /* 左侧阴影 */
+    0 4px 8px var(--color-pink-light);   /* 下边阴影 */
+}
+
+/*
+ *=============================
+ * 脚注样式
+ *=============================
+*/
+
+/* 脚注标记样式 */
+.markdown-body sup.md-footnote {
+  font-family: "楷体", "KaiTi", "Consolas", monospace;            /* 字体 */
+  background-color: var(--color-pink-tender); /* 背景颜色*/
+  color: var(--color-pink-hot);               /* 文本颜色 */
+  padding: 2px 4px;                           /* 内边距 */
+  border-radius: 3px;                         /* 圆角 */
+}
+
+/* 脚注定义样式 */
+.markdown-body .md-def-name {
+  font-family: "楷体", "KaiTi", "Consolas", monospace;    /* 字体 */
+  font-size: var(--fontsize-normal);  /* 字号 */
+  color: var(--color-pink-hot);       /* 文本颜色 */
+}
+
+/* 脚注内容样式 */
+.markdown-body .footnotes,
+.markdown-body .footnotes p,
+.markdown-body .footnotes li {
+  font-family: "楷体", "KaiTi", "Consolas", monospace;    /* 字体 */
+  font-size: var(--fontsize-normal);  /* 字号 */
+}
+
+/*
+  *=============================
+  * 数学公式样式
+  *=============================
+*/
+
+/* 基本样式 */
+.markdown-body .katex,
+.markdown-body .katex-display {
+  font-size: var(--fontsize-title5);
+  color: var(--color-pink-hot);
+}
+
+.markdown-body .katex-display {
+  margin: 1rem 0;
+  text-align: center;
+}
+
+/*
+  *=============================
+  * 复选框样式
+  *=============================
+*/
+
+.markdown-body input[type="checkbox"] { /* 隐藏原生复选框 */
+  width: 0;   
+  height: 0;
+  opacity: 0;
+  position: absolute;
+}
+
+.markdown-body .task-list-item {
+  list-style: none;
+  position: relative;
+}
+
+.markdown-body .task-list-item::before {  /* 移除无序列表的符号 */
+  display: none !important;
+}
+
+/* 复选框样式 */
+.markdown-body .task-list-item input::before {
+  content: "";                                        /* 空白复选框 */
+  display: inline-block;                              /* 行内块级显示 */
+  width: var(--fontsize-title5);                      /* 复选框宽度 */
+  height: var(--fontsize-title5);                     /* 复选框高度 */
+  vertical-align: middle;                             /* 垂直居中对齐 */
+  border: 1px solid var(--color-pink-soft);           /* 复选框颜色 */
+  border-radius: calc(0.5 * var(--fontsize-title5));  /* 圆形复选框 */
+  margin-left: calc(-1 * var(--fontsize-normal));     /* 左移 */
+  margin-top: -0.8rem;                                /* 上移 */
+  position: absolute;
+  left: 0;
+}
+
+/* 对勾样式 */
+.markdown-body .task-list-item input:checked::before {
+  content: "♪";                         /* 符号 */
+  color: var(--color-pink-hot);         /* 颜色 */
+  font-size: var(--fontsize-title1);     /* 字号 */
+  line-height: var(--fontsize-normal);  /* 行高 */
+  text-align: center;
+}
+
+/*
+  *=============================
+  * 容器样式（admonition）
+  *=============================
+*/
+
+.markdown-body .tip,
+.markdown-body .note,
+.markdown-body .info,
+.markdown-body .warning,
+.markdown-body .danger {
+  border-left: 10px solid var(--color-pink-light);
+  padding: 15px 30px 15px 20px;
+  margin: 20px 0;
+  background-color: var(--color-pink-bright);
+  color: var(--color-pink-hot);
+  border-radius: 8px;
+}
+
+.markdown-body .warning {
+  border-left-color: #ff9800;
+  background-color: #fff3e0;
+}
+
+.markdown-body .danger {
+  border-left-color: #f44336;
+  background-color: #ffebee;
+}
+

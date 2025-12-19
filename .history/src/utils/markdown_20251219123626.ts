@@ -1,0 +1,468 @@
+/**
+ * Markdown 渲染工具
+ * 纯函数式渲染，不依赖任何外部服务
+ * 为 AI 预留接口：AI 可以生成 Markdown，直接使用此函数渲染
+ */
+
+import { marked } from 'marked'
+import mermaid from 'mermaid'
+
+// highlight.js 将从 public 目录动态加载
+
+// 自定义 renderer 确保标题 ID 正确生成
+const renderer = new marked.Renderer()
+
+// 标题渲染器（生成锚点 ID）
+renderer.heading = function(text: string, level: number) {
+  // 确保 text 是字符串类型
+  const textStr = typeof text === 'string' ? text : String(text || '')
+  
+  // 从 HTML 中提取纯文本（移除可能的 HTML 标签）
+  const tempDiv = document.createElement('div')
+  tempDiv.innerHTML = textStr
+  const plainText = tempDiv.textContent || tempDiv.innerText || textStr
+  
+  // 生成 ID（与 extractTOC 保持一致）
+  const id = plainText
+    .toLowerCase()
+    .replace(/[^\w\s-]/g, '')  // 移除特殊字符，保留字母、数字、空格、连字符
+    .replace(/\s+/g, '-')      // 空格替换为连字符
+    .replace(/-+/g, '-')       // 多个连字符合并为一个
+    .replace(/^-|-$/g, '')     // 移除首尾连字符
+    .trim()
+  
+  return `<h${level} id="${id}">${textStr}</h${level}>`
+}
+
+// 代码块渲染器（支持行号）
+renderer.code = function(code: string, language?: string, isEscaped?: boolean) {
+  const lang = language || ''
+  const escaped = isEscaped ? code : escapeHtml(code)
+  
+  // 检查是否启用行号（通过 language 参数，如 `python:showLineNumbers`）
+  const showLineNumbers = lang.includes(':showLineNumbers')
+  const actualLang = showLineNumbers ? lang.replace(':showLineNumbers', '') : lang
+  
+  // 为代码块添加行号
+  if (showLineNumbers) {
+    const lines = escaped.split('\n')
+    const numberedLines = lines.map((line: string, index: number) => {
+      const lineNum = index + 1
+      return `<span class="line-number">${lineNum}</span><span class="line-content">${line || ' '}</span>`
+    }).join('\n')
+    
+    return `<pre class="hljs code-with-lines"><code class="language-${actualLang}">${numberedLines}</code></pre>`
+  }
+  
+  return `<pre class="hljs"><code class="language-${actualLang}">${escaped}</code></pre>`
+}
+
+// 段落渲染器（支持下划线）
+renderer.paragraph = function(text: string) {
+  // 处理下划线语法：__text__ 或 <u>text</u>
+  // marked 默认不支持下划线，但我们可以通过 HTML 标签支持
+  return `<p>${text}</p>`
+}
+
+// 列表项渲染器（支持任务列表）
+renderer.listitem = function(text: string, task: boolean, checked: boolean) {
+  if (task) {
+    const checkedAttr = checked ? 'checked' : ''
+    return `<li class="task-list-item"><input type="checkbox" ${checkedAttr} disabled> ${text}</li>`
+  }
+  return `<li>${text}</li>`
+}
+
+// 配置 marked - 支持完整的 GitHub 风格 Markdown
+marked.setOptions({
+  breaks: true,        // 支持 GitHub 风格的换行（单个换行也会换行）
+  gfm: true,           // GitHub 风格 Markdown（任务列表、表格、删除线等）
+  mangle: false,       // 不混淆邮箱地址
+  pedantic: false,     // 不使用原始 Markdown.pl 的行为
+  sanitize: false,     // 不清理 HTML（允许 HTML 标签）
+  silent: false,       // 不静默忽略错误
+  smartLists: true,    // 使用更智能的列表行为
+  smartypants: false,  // 不使用智能标点符号
+  renderer: renderer,  // 使用自定义 renderer 确保标题 ID 正确生成
+  highlight: function(code: string, _lang?: string) {
+    // highlight.js 将从 public 目录动态加载
+    // 这里先返回原始代码，高亮将在前端完成
+    // marked 会自动包装在 <pre><code> 中
+    return code
+  }
+} as any)
+
+/**
+ * 纯函数：渲染 Markdown 为 HTML
+ * @param markdownText Markdown 文本内容
+ * @returns 渲染后的 HTML 字符串
+ * 
+ * 注意：此函数是纯函数，不依赖：
+ * - 文件路径
+ * - UI 状态
+ * - 外部服务
+ * 
+ * 为 AI 预留：AI 可以生成 Markdown，直接调用此函数渲染
+ */
+// 初始化 Mermaid
+mermaid.initialize({
+  startOnLoad: false,
+  theme: 'default',
+  securityLevel: 'loose',
+  flowchart: {
+    useMaxWidth: true,
+    htmlLabels: true,
+  },
+})
+
+/**
+ * 纯函数：渲染 Markdown 为 HTML
+ * @param markdownText Markdown 文本内容
+ * @param basePath 基础路径（用于处理相对路径的图片和链接）
+ * @returns 渲染后的 HTML 字符串
+ * 
+ * 注意：此函数是纯函数，不依赖：
+ * - 文件路径
+ * - UI 状态
+ * - 外部服务
+ * 
+ * 为 AI 预留：AI 可以生成 Markdown，直接调用此函数渲染
+ */
+export function renderMarkdown(markdownText: string, basePath?: string): string {
+  if (!markdownText || !markdownText.trim()) {
+    return '<p>内容为空</p>'
+  }
+  
+  try {
+    // 预处理：处理脚注（格式：[^1] 和 [^1]: 说明）
+    const footnoteMap = new Map<string, string>()
+    const footnoteRefs: string[] = []
+    
+    // 提取脚注定义（格式：[^id]: 说明）
+    let processedText = markdownText.replace(/\[\^([^\]]+)\]:\s*(.+?)(?=\n\[\^|\n\n|$)/gs, (_match, id, content) => {
+      footnoteMap.set(id, content.trim())
+      return '' // 移除脚注定义，稍后在底部添加
+    })
+    
+    // 处理脚注引用（格式：[^1]）
+    processedText = processedText.replace(/\[\^([^\]]+)\]/g, (match, id) => {
+      if (footnoteMap.has(id)) {
+        const footnoteIndex = footnoteRefs.indexOf(id)
+        let index: number
+        if (footnoteIndex === -1) {
+          footnoteRefs.push(id)
+          index = footnoteRefs.length
+        } else {
+          index = footnoteIndex + 1
+        }
+        return `<sup class="footnote-ref"><a href="#footnote-${id}" id="footnote-ref-${id}">[${index}]</a></sup>`
+      }
+      return match
+    })
+    
+    // 使用 marked 渲染 Markdown
+    let html = marked.parse(processedText) as string
+    
+    // 添加脚注区域
+    if (footnoteRefs.length > 0) {
+      const footnotesHtml = footnoteRefs.map((id, index) => {
+        const content = footnoteMap.get(id) || ''
+        return `<div class="footnote-item" id="footnote-${id}">
+          <span class="footnote-number">[${index + 1}]</span>
+          <span class="footnote-content">${marked.parse(content) as string}</span>
+          <a href="#footnote-ref-${id}" class="footnote-backref">↩</a>
+        </div>`
+      }).join('\n')
+      html += `<div class="footnotes">\n<h4>脚注</h4>\n${footnotesHtml}\n</div>`
+    }
+    
+    // 处理 Emoji 表情（支持 :emoji: 格式和 Unicode Emoji）
+    // 简单的 Emoji 映射（常用表情）
+    const emojiMap: Record<string, string> = {
+      ':smile:': '😊',
+      ':heart:': '❤️',
+      ':thumbsup:': '👍',
+      ':thumbsdown:': '👎',
+      ':fire:': '🔥',
+      ':rocket:': '🚀',
+      ':warning:': '⚠️',
+      ':check:': '✅',
+      ':cross:': '❌',
+      ':info:': 'ℹ️',
+      ':question:': '❓',
+      ':exclamation:': '❗',
+      ':star:': '⭐',
+      ':tada:': '🎉',
+      ':bulb:': '💡',
+      ':lock:': '🔒',
+      ':unlock:': '🔓',
+      ':key:': '🔑',
+      ':book:': '📚',
+      ':computer:': '💻',
+      ':gear:': '⚙️',
+      ':link:': '🔗',
+      ':email:': '📧',
+      ':phone:': '📱',
+      ':calendar:': '📅',
+      ':clock:': '🕐',
+      ':arrow_right:': '→',
+      ':arrow_left:': '←',
+      ':arrow_up:': '↑',
+      ':arrow_down:': '↓',
+    }
+    
+    // 替换 :emoji: 格式
+    for (const [key, value] of Object.entries(emojiMap)) {
+      html = html.replace(new RegExp(key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), value)
+    }
+    
+    // 处理下划线语法（__text__ 或 <u>text</u>）
+    // marked 默认不支持 __text__，但我们可以通过后处理支持
+    html = html.replace(/__([^_]+)__/g, '<u>$1</u>')
+    
+    // 处理 HTML 标签（如 <kbd>、<mark> 等）
+    // marked 已经支持 HTML（sanitize: false），这里确保它们被正确渲染
+    
+    // 处理折叠内容块（格式：<details>...</details>）
+    html = html.replace(/<details>([\s\S]*?)<\/details>/gi, (_match, content) => {
+      const summaryMatch = content.match(/<summary>([\s\S]*?)<\/summary>/i)
+      const summary = summaryMatch ? summaryMatch[1] : '点击展开'
+      const detailsContent = content.replace(/<summary>[\s\S]*?<\/summary>/i, '')
+      return `<div class="collapsible-block"><div class="collapsible-header"><span class="collapsible-icon">▼</span><span class="collapsible-title">${summary}</span></div><div class="collapsible-content">${detailsContent}</div></div>`
+    })
+    
+    // 处理自定义按钮/标签（格式：`[button:文本]` 或 `[tag:文本:类型]`）
+    html = html.replace(/\[button:([^\]]+)\]/g, '<button class="wiki-button">$1</button>')
+    html = html.replace(/\[tag:([^\]]+):([^\]]+)\]/g, '<span class="wiki-tag wiki-tag-$2">$1</span>')
+    
+    // 处理特殊引用块（警告、提示、注意事项）
+    // 格式：> [!WARNING] 或 > [!NOTE] 或 > [!TIP] 或 > [!CAUTION]
+    html = html.replace(/<blockquote>\s*<p>\s*\[!(WARNING|NOTE|TIP|CAUTION|INFO)\]\s*(.*?)<\/p>\s*<\/blockquote>/g, (_match, type, content) => {
+      const typeClass = type.toLowerCase()
+      return `<div class="admonition admonition-${typeClass}"><div class="admonition-title">${getAdmonitionTitle(type)}</div><div class="admonition-content">${content}</div></div>`
+    })
+    
+    // 处理 KaTeX 数学公式（行内：$...$，块级：$$...$$）
+    // 先处理块级公式（$$...$$），避免与行内公式冲突
+    // 排除代码块中的 $ 符号
+    html = html.replace(/\$\$([\s\S]*?)\$\$/g, (match, formula) => {
+      // 检查是否在代码块中
+      if (match.includes('<code') || match.includes('</code>') || match.includes('<pre')) {
+        return match
+      }
+      return `<div class="katex-block" data-formula="${escapeHtml(formula.trim())}">${formula.trim()}</div>`
+    })
+    // 处理行内公式，需要更精确的匹配，避免匹配代码中的 $ 符号
+    // 只匹配不在代码块中的 $...$，且公式内容看起来像数学表达式
+    html = html.replace(/\$([^\$\n]+?)\$/g, (match, formula) => {
+      // 检查是否在代码块中
+      const beforeMatch = html.substring(0, html.indexOf(match))
+      const afterMatch = html.substring(html.indexOf(match) + match.length)
+      // 检查前后是否有代码标签
+      const beforeCode = beforeMatch.lastIndexOf('<code') > beforeMatch.lastIndexOf('</code>')
+      const afterCode = afterMatch.indexOf('</code>') < afterMatch.indexOf('<code')
+      if (beforeCode || afterCode) {
+        return match
+      }
+      // 只处理看起来像数学公式的内容（包含数学符号或字母数字组合）
+      const mathPattern = /[a-zA-Z0-9\s+\-*/=()\[\]{},.^_\\]/
+      if (!mathPattern.test(formula.trim())) {
+        return match
+      }
+      return `<span class="katex-inline" data-formula="${escapeHtml(formula.trim())}">${formula.trim()}</span>`
+    })
+    
+    // 处理 Mermaid 图表
+    // 查找所有 mermaid 代码块并替换为占位符
+    html = html.replace(/<pre><code class="language-mermaid">([\s\S]*?)<\/code><\/pre>/g, (_match, code) => {
+      const id = `mermaid-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+      return `<div class="mermaid" id="${id}">${code.trim()}</div>`
+    })
+    
+    // 处理相对路径的图片和链接（如果提供了 basePath）
+    if (basePath) {
+      const baseDir = basePath.substring(0, basePath.lastIndexOf('/') + 1)
+      
+      // 处理相对路径的图片
+      html = html.replace(/<img([^>]*?)src="([^"]+)"([^>]*?)>/g, (match, before, src, after) => {
+        // 如果是相对路径且不是 data: 或 http(s):// 开头
+        if (!src.startsWith('data:') && !src.startsWith('http://') && !src.startsWith('https://') && !src.startsWith('/')) {
+          // 构建相对于 wiki 根目录的路径
+          const resolvedPath = baseDir + src.replace(/^\.\//, '')
+          return `<img${before}src="${resolvedPath}"${after} data-wiki-image="${resolvedPath}">`
+        }
+        return match
+      })
+      
+      // 处理相对路径的链接（Markdown 内部链接）
+      html = html.replace(/<a([^>]*?)href="([^"]+)"([^>]*?)>/g, (match, before, href, after) => {
+        // 如果是相对路径且不是 http(s):// 或 # 开头
+        if (!href.startsWith('http://') && !href.startsWith('https://') && !href.startsWith('#') && !href.startsWith('/')) {
+          // 只处理 .md 或 .markdown 文件，忽略纯文本链接
+          if (href.endsWith('.md') || href.endsWith('.markdown')) {
+            const resolvedPath = baseDir + href.replace(/^\.\//, '')
+            return `<a${before}href="#" data-wiki-link="${resolvedPath}" class="wiki-internal-link"${after}>`
+          }
+          // 对于非 .md 文件的相对路径，保持原样（可能是锚点或其他资源）
+        }
+        return match
+      })
+    }
+    
+    return html
+  } catch (error) {
+    // console.error('Markdown 渲染失败:', error)
+    return `<p>渲染失败: ${error instanceof Error ? error.message : String(error)}</p>`
+  }
+}
+
+/**
+ * 渲染 Mermaid 图表（需要在 DOM 更新后调用）
+ * @param container 容器元素，如果为 null 则在 document 中查找所有 .mermaid 元素
+ */
+export async function renderMermaidCharts(container: HTMLElement | null = null): Promise<void> {
+  try {
+    const elements = container 
+      ? container.querySelectorAll('.mermaid')
+      : document.querySelectorAll('.mermaid')
+    
+    if (elements.length === 0) return
+    
+    // 为每个 Mermaid 元素生成唯一 ID
+    elements.forEach((element, index) => {
+      if (!element.id) {
+        element.id = `mermaid-${Date.now()}-${index}`
+      }
+    })
+    
+    // 渲染所有 Mermaid 图表
+    await mermaid.run({
+      nodes: Array.from(elements) as HTMLElement[],
+    })
+  } catch (error) {
+    // console.error('Mermaid 渲染失败:', error)
+  }
+}
+
+/**
+ * 从 Markdown 文本提取标题
+ * @param markdownText Markdown 文本
+ * @returns 第一个一级或二级标题，如果没有则返回 null
+ */
+export function extractTitle(markdownText: string): string | null {
+  if (!markdownText) return null
+  
+  const lines = markdownText.trim().split('\n')
+  for (const line of lines) {
+    const trimmed = line.trim()
+    if (trimmed.startsWith('# ')) {
+      return trimmed.substring(2).trim()
+    } else if (trimmed.startsWith('## ')) {
+      return trimmed.substring(3).trim()
+    }
+  }
+  
+  return null
+}
+
+/**
+ * 转义 HTML
+ */
+function escapeHtml(text: string): string {
+  const div = document.createElement('div')
+  div.textContent = text
+  return div.innerHTML
+}
+
+/**
+ * 获取引用块标题
+ */
+function getAdmonitionTitle(type: string): string {
+  const titles: Record<string, string> = {
+    'WARNING': '⚠️ 警告',
+    'NOTE': 'ℹ️ 提示',
+    'TIP': '💡 技巧',
+    'CAUTION': '⚠️ 注意',
+    'INFO': 'ℹ️ 信息',
+  }
+  return titles[type] || '提示'
+}
+
+/**
+ * 从 Markdown 文本提取目录结构
+ * @param markdownText Markdown 文本
+ * @returns 目录项数组
+ */
+export interface TocItem {
+  level: number
+  id: string
+  text: string
+  children?: TocItem[]
+}
+
+export function extractTOC(markdownText: string): TocItem[] {
+  if (!markdownText) return []
+  
+  const lines = markdownText.split('\n')
+  const toc: TocItem[] = []
+  const stack: TocItem[] = []
+  
+  for (const line of lines) {
+    const trimmed = line.trim()
+    if (!trimmed.startsWith('#')) continue
+    
+    // 计算标题级别
+    let level = 0
+    while (level < trimmed.length && trimmed[level] === '#') {
+      level++
+    }
+    
+    if (level > 6) continue // 只支持 h1-h6
+    
+    const text = trimmed.substring(level).trim()
+    if (!text) continue
+    
+    // 生成 ID（与 marked 的 headerIds 保持一致）
+    // marked 的 ID 生成规则：小写、移除特殊字符、空格转连字符、合并多个连字符
+    const id = text
+      .toLowerCase()
+      .replace(/[^\w\s-]/g, '')  // 移除特殊字符，保留字母、数字、空格、连字符
+      .replace(/\s+/g, '-')      // 空格替换为连字符
+      .replace(/-+/g, '-')       // 多个连字符合并为一个
+      .replace(/^-|-$/g, '')     // 移除首尾连字符
+      .trim()
+    
+    const item: TocItem = {
+      level,
+      id,
+      text,
+    }
+    
+    // 构建层级结构
+    while (stack.length > 0) {
+      const top = stack[stack.length - 1]
+      if (top && top.level >= level) {
+        stack.pop()
+      } else {
+        break
+      }
+    }
+    
+    if (stack.length === 0) {
+      toc.push(item)
+    } else {
+      const parent = stack[stack.length - 1]
+      if (parent) {
+        if (!parent.children) {
+          parent.children = []
+        }
+        parent.children.push(item)
+      }
+    }
+    
+    stack.push(item)
+  }
+  
+  return toc
+}
+

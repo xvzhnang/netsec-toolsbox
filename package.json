@@ -8,9 +8,23 @@
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "build:markdown-it": "esbuild markdown-it.bundle.js --bundle --minify --format=iife --outfile=public/markdown-it/markdown-it.bundle.min.js"
   },
   "dependencies": {
+    "highlight.js": "^11.11.1",
+    "katex": "^0.16.27",
+    "markdown-it": "^14.1.0",
+    "markdown-it-anchor": "^9.2.0",
+    "markdown-it-attrs": "^4.3.1",
+    "markdown-it-container": "^4.0.0",
+    "markdown-it-emoji": "^3.0.0",
+    "markdown-it-footnote": "^4.0.0",
+    "markdown-it-katex": "^2.0.3",
+    "markdown-it-mermaid": "^0.2.5",
+    "markdown-it-multimd-table": "^4.2.3",
+    "markdown-it-task-lists": "^2.1.1",
+    "markdown-it-toc-done-right": "^4.2.0",
     "marked": "^17.0.1",
     "mermaid": "^11.12.2",
     "vue": "^3.5.24",
@@ -20,6 +34,7 @@
     "@types/node": "^24.10.1",
     "@vitejs/plugin-vue": "^6.0.1",
     "@vue/tsconfig": "^0.8.1",
+    "esbuild": "^0.24.2",
     "typescript": "~5.9.3",
     "vite": "^7.2.4",
     "vue-tsc": "^3.1.4"

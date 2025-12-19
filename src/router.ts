@@ -43,6 +43,12 @@ const routes: RouteRecordRaw[] = [
       toolName: route.query.toolName as string | undefined,
     }),
   },
+  {
+    // 捕获所有未匹配的路由，重定向到首页
+    path: '/:pathMatch(.*)*',
+    name: 'not-found',
+    redirect: '/',
+  },
 ]
 
 export const router = createRouter({
