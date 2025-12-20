@@ -7,6 +7,7 @@ mod icon_extractor;
 mod file_ops;
 mod wiki;
 mod ai_service;
+mod service;
 
 // Wiki 命令
 mod wiki_commands {
@@ -22,6 +23,29 @@ pub use file_ops::*;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+  // 创建 ServiceManager 并注册服务
+  let service_manager = std::sync::Mutex::new(service::ServiceManager::new());
+  
+  // 注册 AI Gateway 服务
+  {
+    let manager = service_manager.lock().unwrap();
+    let ai_gateway_service = std::sync::Arc::new(std::sync::Mutex::new(
+      ai_service::GatewayPoolService::new(
+        "ai-gateway".to_string(),
+        "AI Gateway".to_string(),
+      )
+    ));
+    
+    if let Err(e) = manager.register(ai_gateway_service) {
+      log::warn!("注册 AI Gateway 服务失败: {}", e);
+    } else {
+      log::info!("AI Gateway 服务已注册到 ServiceManager");
+    }
+    
+    // 启动监控线程
+    manager.start_monitoring();
+  }
+  
   tauri::Builder::default()
     .setup(|app| {
       if cfg!(debug_assertions) {
@@ -63,12 +87,31 @@ pub fn run() {
         wiki_commands::search_wiki,
         wiki_commands::get_wiki_dir,
         wiki_commands::find_wiki_for_tool,
-      // AI Gateway 服务
-        ai_service::start_ai_service,
-        ai_service::stop_ai_service,
-        ai_service::check_ai_service_status,
+      // AI Gateway 服务（旧版，保持兼容）
+        ai_service::legacy::start_ai_service,
+        ai_service::legacy::stop_ai_service,
+        ai_service::legacy::check_ai_service_status,
+        ai_service::legacy::read_models_config,
+        ai_service::legacy::write_models_config,
+      // AI Gateway 连接池（新版）
+        ai_service::init_gateway_pool,
+        ai_service::start_gateway_pool,
+        ai_service::stop_gateway_pool,
+        ai_service::forward_ai_request,
+        ai_service::get_gateway_pool_status,
+        ai_service::diagnose_worker,
+      // 统一服务管理（新架构）
+        service::get_all_services,
+        service::get_service_status,
+        service::start_service,
+        service::stop_service,
+        service::restart_service,
+        service::get_prometheus_metrics,
+        service::get_service_metrics,
     ])
-    .manage(ai_service::AIServiceState::default())
+    .manage(ai_service::legacy::AIServiceState::default())
+    .manage(ai_service::AIServicePoolState::default())
+    .manage(service_manager)
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
 }

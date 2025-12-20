@@ -29,10 +29,10 @@ class BaiduConverter(ProtocolConverter):
         获取百度 Access Token
         对应 One API 的 GetAccessToken
         """
+        # 直接使用配置文件中的 api_key，不再支持环境变量
         api_key = self.config.get("api_key", "")
-        if isinstance(api_key, str) and api_key.startswith("ENV:"):
-            env_var = api_key[4:]
-            api_key = os.environ.get(env_var, "")
+        if api_key == "not-needed":
+            api_key = ""
         
         # 检查缓存
         if api_key in self._access_token_cache:

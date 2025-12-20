@@ -1,2 +1,5 @@
-# Protocol Converters Module
-
+# -*- coding: utf-8 -*-
+"""
+协议转换器模块
+提供各种 AI 模型的协议转换实现
+"""

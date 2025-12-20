@@ -1,42 +1,57 @@
 use std::path::PathBuf;
+use std::sync::Once;
 use sha2::{Sha256, Digest};
+
+// 缓存应用程序基础目录，避免重复计算和日志输出
+static APP_BASE_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+static INIT_LOG: Once = Once::new();
 
 /// 获取应用程序基础目录（项目根目录，src-tauri 的父目录）
 /// 用户可自定义的文件都放在这个目录下
-fn get_app_base_dir() -> PathBuf {
-  // 获取可执行文件路径
-  let exe_path = std::env::current_exe()
-    .expect("failed to get executable path");
-  
-  log::debug!("get_app_base_dir: 可执行文件路径: {}", exe_path.display());
-  
-  // 从可执行文件路径向上查找 src-tauri 目录
-  let mut current = exe_path.parent()
-    .expect("failed to get executable directory");
-  
-  log::debug!("get_app_base_dir: 开始从 {} 向上查找 src-tauri 目录", current.display());
-  
-  // 向上查找，直到找到 src-tauri 目录或到达根目录
-  loop {
-    let src_tauri_path = current.join("src-tauri");
-    if src_tauri_path.exists() && src_tauri_path.is_dir() {
-      // 找到 src-tauri 目录，返回其父目录（项目根目录）
-      log::info!("get_app_base_dir: 找到 src-tauri 目录: {}, 项目根目录: {}", src_tauri_path.display(), current.display());
-      return current.to_path_buf();
-    }
+/// 结果会被缓存，避免重复计算和日志输出
+pub fn get_app_base_dir() -> PathBuf {
+  APP_BASE_DIR.get_or_init(|| {
+    // 只在第一次调用时打印日志
+    INIT_LOG.call_once(|| {
+      log::info!("[INIT] 初始化应用程序基础目录...");
+    });
     
-    // 如果已经到达根目录，停止查找
-    if let Some(parent) = current.parent() {
-      current = parent;
-    } else {
-      // 如果找不到 src-tauri 目录（可能是发布版本），降级到可执行文件所在目录
-      let fallback_dir = exe_path.parent()
-        .expect("failed to get executable directory")
-        .to_path_buf();
-      log::warn!("get_app_base_dir: 未找到 src-tauri 目录，使用可执行文件目录: {}", fallback_dir.display());
-      return fallback_dir;
-    }
-  }
+    // 获取可执行文件路径
+    let exe_path = std::env::current_exe()
+      .expect("failed to get executable path");
+    
+    log::debug!("get_app_base_dir: 可执行文件路径: {}", exe_path.display());
+    
+    // 从可执行文件路径向上查找 src-tauri 目录
+    let mut current = exe_path.parent()
+      .expect("failed to get executable directory");
+    
+    log::debug!("get_app_base_dir: 开始从 {} 向上查找 src-tauri 目录", current.display());
+    
+    // 向上查找，直到找到 src-tauri 目录或到达根目录
+    let result = loop {
+      let src_tauri_path = current.join("src-tauri");
+      if src_tauri_path.exists() && src_tauri_path.is_dir() {
+        // 找到 src-tauri 目录，返回其父目录（项目根目录）
+        log::info!("get_app_base_dir: 找到 src-tauri 目录: {}, 项目根目录: {}", src_tauri_path.display(), current.display());
+        break current.to_path_buf();
+      }
+      
+      // 如果已经到达根目录，停止查找
+      if let Some(parent) = current.parent() {
+        current = parent;
+      } else {
+        // 如果找不到 src-tauri 目录（可能是发布版本），降级到可执行文件所在目录
+        let fallback_dir = exe_path.parent()
+          .expect("failed to get executable directory")
+          .to_path_buf();
+        log::warn!("get_app_base_dir: 未找到 src-tauri 目录，使用可执行文件目录: {}", fallback_dir.display());
+        break fallback_dir;
+      }
+    };
+    
+    result
+  }).clone()
 }
 
 /// 获取配置目录路径（在项目根目录下的 .config 文件夹）

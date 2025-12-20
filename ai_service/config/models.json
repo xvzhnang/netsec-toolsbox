@@ -33,8 +33,8 @@
       "id": "deepseek-chat",
       "adapter": "openai_compat",
       "base_url": "https://api.deepseek.com/v1",
-      "api_key": "ENV:DEEPSEEK_API_KEY",
-      "enabled": false,
+      "api_key": "sk-8219e24a004c445985e4c291a7a15698",
+      "enabled": true,
       "model": "deepseek-chat",
       "temperature": 0.7,
       "max_tokens": 2000,
@@ -207,8 +207,12 @@
       "timeout": 60
     },
     {
+      "_comment": "=== WebSocket 模型（使用 websocket 适配器）===",
+      "_note": "这些模型使用 WebSocket 协议进行通信"
+    },
+    {
       "id": "xunfei-spark-max",
-      "adapter": "custom_http",
+      "adapter": "websocket",
       "base_url": "wss://spark-api.xf-yun.com",
       "api_key": "ENV:XUNFEI_API_KEY",
       "enabled": false,
@@ -221,7 +225,9 @@
       "timeout": 60,
       "config": {
         "app_id": "ENV:XUNFEI_APP_ID",
-        "api_secret": "ENV:XUNFEI_API_SECRET"
+        "api_secret": "ENV:XUNFEI_API_SECRET",
+        "api_version": "v3.5",
+        "domain": "generalv3.5"
       }
     },
     {
@@ -303,28 +309,22 @@
     },
     {
       "id": "lingyiwanwu-yi-34b",
-      "adapter": "custom_http",
+      "adapter": "openai_compat",
       "base_url": "https://api.lingyiwanwu.com/v1",
       "api_key": "ENV:LINGYIWANWU_API_KEY",
       "enabled": false,
       "model": "yi-34b-chat-0205",
-      "endpoint": "/chat/completions",
-      "request_format": "lingyiwanwu",
-      "response_format": "openai",
       "temperature": 0.7,
       "max_tokens": 2000,
       "timeout": 60
     },
     {
       "id": "stepfun-step-1",
-      "adapter": "custom_http",
+      "adapter": "openai_compat",
       "base_url": "https://api.stepfun.com/v1",
       "api_key": "ENV:STEPFUN_API_KEY",
       "enabled": false,
       "model": "step-1-32k",
-      "endpoint": "/chat/completions",
-      "request_format": "stepfun",
-      "response_format": "openai",
       "temperature": 0.7,
       "max_tokens": 2000,
       "timeout": 60
@@ -490,8 +490,59 @@
       "temperature": 0.7,
       "max_tokens": 2000,
       "timeout": 60
+    },
+    {
+      "_comment": "=== 本地 CLI 工具（使用 process 适配器）===",
+      "_note": "这些模型通过本地命令行工具运行"
+    },
+    {
+      "id": "local-llama-cpp",
+      "adapter": "process",
+      "command": "llama-cli",
+      "args": [
+        "-m",
+        "ENV:LLAMA_MODEL_PATH",
+        "--ctx-size",
+        "4096",
+        "--temp",
+        "0.7"
+      ],
+      "enabled": false,
+      "input_format": "prompt",
+      "output_format": "text",
+      "timeout": 120,
+      "working_dir": null,
+      "env": null
+    },
+    {
+      "id": "local-ollama-cli",
+      "adapter": "process",
+      "command": "ollama",
+      "args": [
+        "run",
+        "llama3"
+      ],
+      "enabled": false,
+      "input_format": "prompt",
+      "output_format": "text",
+      "timeout": 120,
+      "working_dir": null,
+      "env": null
+    },
+    {
+      "id": "local-custom-json",
+      "adapter": "process",
+      "command": "python",
+      "args": [
+        "-c",
+        "import sys, json; data=json.load(sys.stdin); print(json.dumps({'content': f'Response to: {data.get(\"messages\", [{}])[-1].get(\"content\", \"\")}'}))"
+      ],
+      "enabled": false,
+      "input_format": "json",
+      "output_format": "json",
+      "timeout": 60,
+      "working_dir": null,
+      "env": null
     }
   ]
 }
-
-

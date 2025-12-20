@@ -1,7 +1,7 @@
 {
   "name": "netsec-toolbox",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Ne0XSec's Toolbox - A desktop application for managing and launching security tools",
   "author": "序章",
   "type": "module",

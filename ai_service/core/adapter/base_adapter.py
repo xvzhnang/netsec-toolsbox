@@ -4,7 +4,7 @@ AI 模型适配器基类
 对应 One API 的 relay/adaptor/interface.go
 """
 from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, AsyncIterator
 from dataclasses import dataclass
 
 
@@ -42,6 +42,21 @@ class OpenAIChatResponse:
     usage: Optional[Dict[str, int]] = None
 
 
+@dataclass
+class OpenAIStreamChunk:
+    """OpenAI 流式响应数据块"""
+    id: str
+    object: str = "chat.completion.chunk"
+    created: int = 0
+    model: str = ""
+    choices: List[Dict[str, Any]] = None
+    usage: Optional[Dict[str, int]] = None  # 最后一个 chunk 可能包含 usage
+    
+    def __post_init__(self):
+        if self.choices is None:
+            self.choices = []
+
+
 class ChatAdapter(ABC):
     """
     AI 模型适配器基类
@@ -65,7 +80,7 @@ class ChatAdapter(ABC):
         timeout: Optional[int] = None
     ) -> OpenAIChatResponse:
         """
-        发送聊天消息并获取回复
+        发送聊天消息并获取回复（非流式）
         
         这个方法合并了 One API 的以下方法：
         - GetRequestURL: 构建目标 API URL
@@ -82,6 +97,65 @@ class ChatAdapter(ABC):
             OpenAI 格式的响应
         """
         pass
+    
+    async def chat_stream(
+        self,
+        request: OpenAIChatRequest,
+        timeout: Optional[int] = None
+    ) -> AsyncIterator[OpenAIStreamChunk]:
+        """
+        发送聊天消息并获取流式回复（SSE）
+        
+        默认实现：使用非流式请求，然后分块返回
+        支持流式的适配器应该重写此方法
+        
+        Args:
+            request: OpenAI 格式的请求
+            timeout: 超时时间（秒），None 表示使用默认值
+        
+        Yields:
+            OpenAI 格式的流式响应数据块
+        """
+        # 降级到非流式请求
+        request.stream = False
+        response = await self.chat(request, timeout)
+        
+        # 将完整响应分块返回
+        content = ""
+        if response.choices:
+            content = response.choices[0].get("message", {}).get("content", "")
+        
+        # 按字符或单词分块（这里简单按字符）
+        chunk_size = 5  # 每个 chunk 5 个字符
+        for i in range(0, len(content), chunk_size):
+            chunk_content = content[i:i + chunk_size]
+            
+            yield OpenAIStreamChunk(
+                id=response.id,
+                created=response.created,
+                model=response.model,
+                choices=[{
+                    "index": 0,
+                    "delta": {
+                        "role": "assistant",
+                        "content": chunk_content
+                    },
+                    "finish_reason": None
+                }]
+            )
+        
+        # 发送完成标记
+        yield OpenAIStreamChunk(
+            id=response.id,
+            created=response.created,
+            model=response.model,
+            choices=[{
+                "index": 0,
+                "delta": {},
+                "finish_reason": "stop"
+            }],
+            usage=response.usage
+        )
     
     @abstractmethod
     def is_available(self) -> bool:
@@ -117,4 +191,3 @@ class ChatAdapter(ABC):
             "created": 0,  # 可以记录加载时间
             "owned_by": self.adapter_type
         }
-

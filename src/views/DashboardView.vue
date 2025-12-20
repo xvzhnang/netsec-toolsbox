@@ -33,7 +33,8 @@ const router = useRouter()
 const categoriesRef = categoriesConfig
 
 const query = ref('')
-const isAiOpen = ref(true)
+// AI功能默认不开启，由用户自主开启
+const isAiOpen = ref(false)
 // 搜索结果的选中索引（用于键盘导航）
 const selectedSearchIndex = ref(-1)
 

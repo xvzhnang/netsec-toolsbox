@@ -5,7 +5,7 @@ Google Gemini 协议转换器
 """
 import os
 import json
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional
 from .base_converter import ProtocolConverter
 from ..base_adapter import OpenAIChatRequest, OpenAIChatResponse
 
@@ -183,10 +183,10 @@ class GeminiConverter(ProtocolConverter):
     
     def get_request_headers(self) -> Dict[str, str]:
         """获取请求头"""
+        # 直接使用配置文件中的 api_key，不再支持环境变量
         api_key = self.config.get("api_key", "")
-        if isinstance(api_key, str) and api_key.startswith("ENV:"):
-            env_var = api_key[4:]
-            api_key = os.environ.get(env_var, "")
+        if api_key == "not-needed":
+            api_key = ""
         
         return {
             "Content-Type": "application/json",

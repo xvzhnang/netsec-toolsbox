@@ -2378,11 +2378,13 @@ dependencies = [
 name = "netsec-toolbox"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "base64 0.22.1",
  "hex",
  "ico 0.3.0",
  "image",
  "log",
+ "once_cell",
  "regex",
  "reqwest",
  "serde",
@@ -2391,6 +2393,7 @@ dependencies = [
  "tauri",
  "tauri-build",
  "tauri-plugin-log",
+ "tokio",
  "url",
  "urlencoding",
  "uuid",

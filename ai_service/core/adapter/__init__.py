@@ -1,2 +1,5 @@
-# Adapter Module
-
+# -*- coding: utf-8 -*-
+"""
+AI 模型适配器模块
+提供适配器基类和实现
+"""

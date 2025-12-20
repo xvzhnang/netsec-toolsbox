@@ -1,3 +1,4 @@
 aiohttp>=3.9.0
 python-dotenv
 PyJWT>=2.8.0
+websockets>=12.0

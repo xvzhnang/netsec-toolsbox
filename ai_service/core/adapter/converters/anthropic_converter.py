@@ -178,20 +178,17 @@ class AnthropicConverter(ProtocolConverter):
     
     def get_request_headers(self) -> Dict[str, str]:
         """获取请求头"""
+        # 直接使用配置文件中的 api_key，不再支持环境变量
+        api_key = self.config.get("api_key", "")
+        if api_key == "not-needed":
+            api_key = ""
+        
         headers = {
             "Content-Type": "application/json",
-            "x-api-key": self.config.get("api_key", ""),
+            "x-api-key": api_key,
             "anthropic-version": "2023-06-01",
             "anthropic-beta": "messages-2023-12-15"
         }
-        
-        # 支持环境变量
-        api_key = self.config.get("api_key", "")
-        if isinstance(api_key, str) and api_key.startswith("ENV:"):
-            env_var = api_key[4:]
-            api_key = os.environ.get(env_var, "")
-        
-        headers["x-api-key"] = api_key
         
         # 特殊模型支持
         if "claude-3-5-sonnet" in self.model:

@@ -4,7 +4,7 @@
 对应 One API 中各个适配器的 ConvertRequest 和 Response 转换函数
 """
 from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional
 from ..base_adapter import OpenAIChatRequest, OpenAIChatResponse
 
 
