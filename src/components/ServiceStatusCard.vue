@@ -62,8 +62,6 @@
 import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { 
   type ServiceStatusDTO, 
-  getServiceStateText, 
-  getServiceStateColor,
   startService,
   stopService,
   restartService
@@ -84,28 +82,28 @@ const actionInProgress = ref(false)
 
 const cardClass = computed(() => {
   return {
-    'healthy': service.is_healthy && service.is_available,
-    'degraded': service.state === 'degraded',
-    'unhealthy': !service.is_healthy,
-    'stopped': service.state === 'stopped',
+    'healthy': props.service.is_healthy && props.service.is_available,
+    'degraded': props.service.state === 'degraded',
+    'unhealthy': !props.service.is_healthy,
+    'stopped': props.service.state === 'stopped',
   }
 })
 
 const statusDotClass = computed(() => {
   return {
-    'active': service.is_available && service.is_healthy,
-    'degraded': service.state === 'degraded',
-    'error': !service.is_healthy,
+    'active': props.service.is_available && props.service.is_healthy,
+    'degraded': props.service.state === 'degraded',
+    'error': !props.service.is_healthy,
   }
 })
 
 const stateValueClass = computed(() => {
   return {
-    'state-idle': service.state === 'idle',
-    'state-busy': service.state === 'busy',
-    'state-degraded': service.state === 'degraded',
-    'state-unhealthy': service.state === 'unhealthy',
-    'state-stopped': service.state === 'stopped',
+    'state-idle': props.service.state === 'idle',
+    'state-busy': props.service.state === 'busy',
+    'state-degraded': props.service.state === 'degraded',
+    'state-unhealthy': props.service.state === 'unhealthy',
+    'state-stopped': props.service.state === 'stopped',
   }
 })
 

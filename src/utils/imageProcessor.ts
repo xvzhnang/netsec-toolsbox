@@ -98,7 +98,7 @@ export function selectImageFile(): Promise<File | null> {
 }
 
 import { getTauriInvoke } from './tauri'
-import { debug, error as logError, warn } from './logger'
+import { error as logError, warn } from './logger'
 
 /**
  * 从可执行文件路径提取图标
@@ -189,7 +189,10 @@ export function detectFileTypeFromPath(filePath: string): string {
   
   // 提取文件扩展名
   const pathParts = filePath.split(/[/\\]/)
-  const fileName = pathParts[pathParts.length - 1]
+  const fileName = pathParts[pathParts.length - 1] || ''
+  if (!fileName) {
+    return '其他'
+  }
   const lastDotIndex = fileName.lastIndexOf('.')
   
   if (lastDotIndex === -1 || lastDotIndex === fileName.length - 1) {

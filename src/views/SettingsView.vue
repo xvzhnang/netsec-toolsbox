@@ -12,8 +12,6 @@ import {
 import {
   readModelsConfig,
   writeModelsConfig,
-  toggleModelEnabled,
-  updateModelApiKey,
   getValidModels,
   groupModelsByAdapter,
   type ModelConfig,

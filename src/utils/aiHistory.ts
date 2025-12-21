@@ -160,8 +160,19 @@ export async function updateSessionMessage(
     }
     session.messages.push(newMessage)
   } else {
-    // 更新现有消息
-    Object.assign(session.messages[messageIndex], updates)
+    const existingMessage = session.messages[messageIndex]
+    if (existingMessage) {
+      Object.assign(existingMessage, updates)
+    } else {
+      const newMessage: ChatMessage = {
+        id: messageId,
+        role: 'assistant',
+        text: '',
+        timestamp: Date.now(),
+        ...updates,
+      }
+      session.messages.push(newMessage)
+    }
   }
   
   session.updatedAt = Date.now()
@@ -196,7 +207,7 @@ export async function deleteSession(sessionId: string): Promise<void> {
   history.sessions = history.sessions.filter(s => s.id !== sessionId)
   
   if (history.currentSessionId === sessionId) {
-    history.currentSessionId = history.sessions.length > 0 ? history.sessions[0].id : undefined
+    history.currentSessionId = history.sessions[0]?.id
   }
   
   await saveChatHistory(history)

@@ -27,7 +27,7 @@ import { ref, onMounted, onUnmounted } from 'vue'
 import ServiceStatusCard from '../components/ServiceStatusCard.vue'
 import { getAllServices, type ServiceStatusDTO } from '../utils/serviceManager'
 import { onServiceEvent, startServiceEventPolling, stopServiceEventPolling } from '../utils/serviceEvents'
-import { info, error as logError } from '../utils/logger'
+import { error as logError } from '../utils/logger'
 
 const services = ref<ServiceStatusDTO[]>([])
 let refreshInterval: ReturnType<typeof setInterval> | undefined = undefined
@@ -45,7 +45,7 @@ onMounted(() => {
   refreshServices()
   
   // 订阅服务事件（实时更新）
-  const unsubscribe = onServiceEvent((event) => {
+  const unsubscribe = onServiceEvent((_event) => {
     // 任何服务事件都触发刷新
     refreshServices()
   })

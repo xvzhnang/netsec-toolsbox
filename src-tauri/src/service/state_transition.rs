@@ -1,7 +1,7 @@
+use crate::service::state::ServiceState;
+use serde::{Deserialize, Serialize};
 /// 可配置的状态迁移规则
 use std::collections::HashMap;
-use serde::{Deserialize, Serialize};
-use crate::service::state::ServiceState;
 
 /// 状态迁移规则配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -13,64 +13,104 @@ pub struct StateTransitionConfig {
 impl Default for StateTransitionConfig {
     fn default() -> Self {
         let mut transitions = HashMap::new();
-        
+
         // 默认迁移规则（保持向后兼容）
         transitions.insert("stopped".to_string(), vec!["starting".to_string()]);
-        transitions.insert("starting".to_string(), vec!["warmup".to_string(), "idle".to_string(), "unhealthy".to_string()]);
-        transitions.insert("warmup".to_string(), vec!["idle".to_string(), "unhealthy".to_string()]);
-        transitions.insert("idle".to_string(), vec!["busy".to_string(), "degraded".to_string(), "unhealthy".to_string(), "stopping".to_string()]);
-        transitions.insert("busy".to_string(), vec!["idle".to_string(), "degraded".to_string(), "unhealthy".to_string()]);
-        transitions.insert("degraded".to_string(), vec!["idle".to_string(), "busy".to_string(), "unhealthy".to_string(), "stopping".to_string()]);
-        transitions.insert("unhealthy".to_string(), vec!["restarting".to_string(), "stopped".to_string()]);
-        transitions.insert("restarting".to_string(), vec!["starting".to_string(), "stopped".to_string()]);
+        transitions.insert(
+            "starting".to_string(),
+            vec![
+                "warmup".to_string(),
+                "idle".to_string(),
+                "unhealthy".to_string(),
+            ],
+        );
+        transitions.insert(
+            "warmup".to_string(),
+            vec!["idle".to_string(), "unhealthy".to_string()],
+        );
+        transitions.insert(
+            "idle".to_string(),
+            vec![
+                "busy".to_string(),
+                "degraded".to_string(),
+                "unhealthy".to_string(),
+                "stopping".to_string(),
+            ],
+        );
+        transitions.insert(
+            "busy".to_string(),
+            vec![
+                "idle".to_string(),
+                "degraded".to_string(),
+                "unhealthy".to_string(),
+            ],
+        );
+        transitions.insert(
+            "degraded".to_string(),
+            vec![
+                "idle".to_string(),
+                "busy".to_string(),
+                "unhealthy".to_string(),
+                "stopping".to_string(),
+            ],
+        );
+        transitions.insert(
+            "unhealthy".to_string(),
+            vec!["restarting".to_string(), "stopped".to_string()],
+        );
+        transitions.insert(
+            "restarting".to_string(),
+            vec!["starting".to_string(), "stopped".to_string()],
+        );
         transitions.insert("stopping".to_string(), vec!["stopped".to_string()]);
-        
+
         // 任何状态都可以转到 stopped（紧急停止）
         transitions.insert("*".to_string(), vec!["stopped".to_string()]);
-        
+
         Self { transitions }
     }
 }
 
 impl StateTransitionConfig {
     /// 从配置文件加载（未来支持）
+    #[allow(dead_code)]
     pub fn from_file(_path: &str) -> Result<Self, String> {
         // TODO: 实现从文件加载
         Ok(Self::default())
     }
-    
+
     /// 检查状态转换是否合法
     pub fn can_transit(&self, from: ServiceState, to: ServiceState) -> bool {
         // 相同状态允许（幂等）
         if from == to {
             return true;
         }
-        
+
         let from_str = state_to_string(from);
         let to_str = state_to_string(to);
-        
+
         // 检查显式规则
         if let Some(allowed_states) = self.transitions.get(&from_str) {
             if allowed_states.contains(&to_str) {
                 return true;
             }
         }
-        
+
         // 检查通配符规则（紧急停止）
         if let Some(allowed_states) = self.transitions.get("*") {
             if allowed_states.contains(&to_str) {
                 return true;
             }
         }
-        
+
         false
     }
-    
+
     /// 获取所有允许的下一状态
     pub fn get_allowed_transitions(&self, from: ServiceState) -> Vec<ServiceState> {
         let from_str = state_to_string(from);
         let mut allowed = Vec::new();
-        
+
         if let Some(states) = self.transitions.get(&from_str) {
             for state_str in states {
                 if let Some(state) = string_to_state(state_str) {
@@ -78,7 +118,7 @@ impl StateTransitionConfig {
                 }
             }
         }
-        
+
         // 添加通配符规则（紧急停止）
         if let Some(states) = self.transitions.get("*") {
             for state_str in states {
@@ -89,7 +129,7 @@ impl StateTransitionConfig {
                 }
             }
         }
-        
+
         allowed
     }
 }
@@ -106,7 +146,8 @@ fn state_to_string(state: ServiceState) -> String {
         ServiceState::Unhealthy => "unhealthy",
         ServiceState::Restarting => "restarting",
         ServiceState::Stopping => "stopping",
-    }.to_string()
+    }
+    .to_string()
 }
 
 /// 字符串到状态转换
@@ -140,9 +181,11 @@ impl From<ServiceState> for SimpleState {
     fn from(state: ServiceState) -> Self {
         match state {
             ServiceState::Idle | ServiceState::Busy | ServiceState::Degraded => SimpleState::Active,
-            ServiceState::Stopped | ServiceState::Starting | ServiceState::Warmup | ServiceState::Stopping => SimpleState::Inactive,
+            ServiceState::Stopped
+            | ServiceState::Starting
+            | ServiceState::Warmup
+            | ServiceState::Stopping => SimpleState::Inactive,
             ServiceState::Unhealthy | ServiceState::Restarting => SimpleState::Error,
         }
     }
 }
-

@@ -990,7 +990,7 @@ const selectJarFile = async () => {
       try {
         const invoker = getTauriInvoke()
         if (invoker) {
-          const resolved = await invoker('resolve_file_path', {
+          const resolved = await invoker<string>('resolve_file_path', {
             params: {
               filePath: filePath,
             }
@@ -1026,7 +1026,7 @@ const selectHtmlFile = async () => {
       try {
         const invoker = getTauriInvoke()
         if (invoker) {
-          const resolved = await invoker('resolve_file_path', {
+          const resolved = await invoker<string>('resolve_file_path', {
             params: {
               filePath: filePath,
             }
@@ -1251,7 +1251,7 @@ const selectExecutableFile = async () => {
       try {
         const invoker = getTauriInvoke()
         if (invoker) {
-          const resolved = await invoker('resolve_file_path', {
+          const resolved = await invoker<string>('resolve_file_path', {
             params: {
               filePath: filePath,
             }
@@ -3251,5 +3251,4 @@ const onConfirm = () => {
 }
 
 </style>
-
 

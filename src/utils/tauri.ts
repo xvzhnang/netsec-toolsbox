@@ -6,11 +6,13 @@
 import type { TauriWindow } from '../types/tauri'
 import { debug, error as logError, warn } from './logger'
 
+export type TauriInvoke = <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>
+
 /**
  * 获取 Tauri invoke 函数（兼容 Tauri 1.x 和 2.x）
  * @returns invoke 函数，如果不可用则返回 null
  */
-export function getTauriInvoke() {
+export function getTauriInvoke(): TauriInvoke | null {
   try {
     const tauriWindow = window as unknown as TauriWindow
     const win = window as any
@@ -41,38 +43,38 @@ export function getTauriInvoke() {
     // 1. Tauri 2.x core.invoke
     if (tauriWindow.__TAURI__?.core?.invoke) {
       const invoke = tauriWindow.__TAURI__.core.invoke
-      return invoke.bind(tauriWindow.__TAURI__.core) as typeof invoke
+      return invoke.bind(tauriWindow.__TAURI__.core) as TauriInvoke
     }
     
     // 2. Tauri 2.x tauri.invoke
     if (tauriWindow.__TAURI__?.tauri?.invoke) {
       const invoke = tauriWindow.__TAURI__.tauri.invoke
-      return invoke.bind(tauriWindow.__TAURI__.tauri) as typeof invoke
+      return invoke.bind(tauriWindow.__TAURI__.tauri) as TauriInvoke
     }
     
     // 3. Tauri 1.x invoke
     if (tauriWindow.__TAURI__?.invoke) {
       const invoke = tauriWindow.__TAURI__.invoke
-      return invoke.bind(tauriWindow.__TAURI__) as typeof invoke
+      return invoke.bind(tauriWindow.__TAURI__) as TauriInvoke
     }
     
     // 4. 尝试通过 __TAURI_INTERNALS__ 访问（Tauri 2.x 可能使用这种方式）
     if (tauriWindow.__TAURI_INTERNALS__?.invoke) {
       const invoke = tauriWindow.__TAURI_INTERNALS__.invoke
-      return invoke.bind(tauriWindow.__TAURI_INTERNALS__) as typeof invoke
+      return invoke.bind(tauriWindow.__TAURI_INTERNALS__) as TauriInvoke
     }
     
     // 5. 尝试直接访问 window.__TAURI_INTERNALS__.invoke（如果存在）
     const internals = win.__TAURI_INTERNALS__
     if (internals && typeof internals.invoke === 'function') {
-      return internals.invoke.bind(internals)
+      return internals.invoke.bind(internals) as TauriInvoke
     }
     
     // 6. 尝试通过事件系统访问（Tauri 2.x 可能需要）
     if (typeof internals !== 'undefined' && internals.ipc) {
       // 某些情况下可能需要通过 ipc 访问
       if (typeof internals.ipc.invoke === 'function') {
-        return internals.ipc.invoke.bind(internals.ipc)
+        return internals.ipc.invoke.bind(internals.ipc) as TauriInvoke
       }
     }
     
@@ -84,7 +86,7 @@ export function getTauriInvoke() {
         
         // 检查当前对象的 invoke
         if (typeof obj.invoke === 'function') {
-          return obj.invoke.bind(obj)
+          return obj.invoke.bind(obj) as TauriInvoke
         }
         
         // 递归搜索所有属性
@@ -191,4 +193,3 @@ export async function openUrlInBrowser(url: string): Promise<void> {
     throw err
   }
 }
-

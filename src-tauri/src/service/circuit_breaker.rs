@@ -25,6 +25,7 @@ pub struct CircuitBreakerConfig {
     /// 时间窗口（统计失败率的时间窗口）
     pub time_window: Duration,
     /// 最小请求数（时间窗口内最少请求数才统计失败率）
+    #[allow(dead_code)]
     pub min_requests: u32,
 }
 
@@ -67,19 +68,84 @@ impl CircuitBreaker {
         }
     }
 
+    pub fn opened_elapsed(&self) -> Option<Duration> {
+        let opened_at =
+            *crate::utils::lock_or_recover(self.opened_at.as_ref(), "CircuitBreaker.opened_at");
+        opened_at.map(|t| t.elapsed())
+    }
+
+    pub fn reset(&self) {
+        let mut state_guard =
+            crate::utils::lock_or_recover(self.state.as_ref(), "CircuitBreaker.state");
+        *state_guard = CircuitBreakerState::Closed;
+        drop(state_guard);
+
+        let mut failures = crate::utils::lock_or_recover(
+            self.consecutive_failures.as_ref(),
+            "CircuitBreaker.consecutive_failures",
+        );
+        *failures = 0;
+        drop(failures);
+
+        let mut successes = crate::utils::lock_or_recover(
+            self.half_open_successes.as_ref(),
+            "CircuitBreaker.half_open_successes",
+        );
+        *successes = 0;
+        drop(successes);
+
+        let mut opened_at =
+            crate::utils::lock_or_recover(self.opened_at.as_ref(), "CircuitBreaker.opened_at");
+        *opened_at = None;
+    }
+
+    pub fn force_open(&self) {
+        let mut state_guard =
+            crate::utils::lock_or_recover(self.state.as_ref(), "CircuitBreaker.state");
+        *state_guard = CircuitBreakerState::Open;
+        drop(state_guard);
+
+        let mut failures = crate::utils::lock_or_recover(
+            self.consecutive_failures.as_ref(),
+            "CircuitBreaker.consecutive_failures",
+        );
+        *failures = self.config.failure_threshold;
+        drop(failures);
+
+        let mut successes = crate::utils::lock_or_recover(
+            self.half_open_successes.as_ref(),
+            "CircuitBreaker.half_open_successes",
+        );
+        *successes = 0;
+        drop(successes);
+
+        let mut opened_at =
+            crate::utils::lock_or_recover(self.opened_at.as_ref(), "CircuitBreaker.opened_at");
+        *opened_at = Some(Instant::now());
+    }
+
     /// 检查是否允许请求通过
     pub fn can_execute(&self) -> bool {
-        let state = *self.state.lock().unwrap();
-        
+        let state = *crate::utils::lock_or_recover(self.state.as_ref(), "CircuitBreaker.state");
+
         match state {
             CircuitBreakerState::Closed => true,
             CircuitBreakerState::Open => {
                 // 检查是否超时，进入半开状态
-                if let Some(opened_at) = *self.opened_at.lock().unwrap() {
+                if let Some(opened_at) = *crate::utils::lock_or_recover(
+                    self.opened_at.as_ref(),
+                    "CircuitBreaker.opened_at",
+                ) {
                     if opened_at.elapsed() >= self.config.timeout {
-                        let mut state_guard = self.state.lock().unwrap();
+                        let mut state_guard = crate::utils::lock_or_recover(
+                            self.state.as_ref(),
+                            "CircuitBreaker.state",
+                        );
                         *state_guard = CircuitBreakerState::HalfOpen;
-                        let mut successes = self.half_open_successes.lock().unwrap();
+                        let mut successes = crate::utils::lock_or_recover(
+                            self.half_open_successes.as_ref(),
+                            "CircuitBreaker.half_open_successes",
+                        );
                         *successes = 0;
                         return true; // 半开状态允许一个请求测试
                     }
@@ -92,14 +158,21 @@ impl CircuitBreaker {
 
     /// 记录成功
     pub fn record_success(&self) {
-        let mut state_guard = self.state.lock().unwrap();
-        let mut failures = self.consecutive_failures.lock().unwrap();
-        let mut history = self.request_history.lock().unwrap();
-        
+        let mut state_guard =
+            crate::utils::lock_or_recover(self.state.as_ref(), "CircuitBreaker.state");
+        let mut failures = crate::utils::lock_or_recover(
+            self.consecutive_failures.as_ref(),
+            "CircuitBreaker.consecutive_failures",
+        );
+        let mut history = crate::utils::lock_or_recover(
+            self.request_history.as_ref(),
+            "CircuitBreaker.request_history",
+        );
+
         // 记录到历史
         history.push((Instant::now(), true));
         self.cleanup_old_history(&mut history);
-        
+
         match *state_guard {
             CircuitBreakerState::Closed => {
                 // 重置连续失败次数
@@ -107,14 +180,20 @@ impl CircuitBreaker {
             }
             CircuitBreakerState::HalfOpen => {
                 // 半开状态下成功，增加成功计数
-                let mut successes = self.half_open_successes.lock().unwrap();
+                let mut successes = crate::utils::lock_or_recover(
+                    self.half_open_successes.as_ref(),
+                    "CircuitBreaker.half_open_successes",
+                );
                 *successes += 1;
-                
+
                 // 如果成功次数达到阈值，关闭熔断器
                 if *successes >= self.config.success_threshold {
                     *state_guard = CircuitBreakerState::Closed;
                     *failures = 0;
-                    let mut opened_at = self.opened_at.lock().unwrap();
+                    let mut opened_at = crate::utils::lock_or_recover(
+                        self.opened_at.as_ref(),
+                        "CircuitBreaker.opened_at",
+                    );
                     *opened_at = None;
                 }
             }
@@ -126,36 +205,52 @@ impl CircuitBreaker {
 
     /// 记录失败
     pub fn record_failure(&self) {
-        let mut state_guard = self.state.lock().unwrap();
-        let mut failures = self.consecutive_failures.lock().unwrap();
-        let mut history = self.request_history.lock().unwrap();
-        
+        let mut state_guard =
+            crate::utils::lock_or_recover(self.state.as_ref(), "CircuitBreaker.state");
+        let mut failures = crate::utils::lock_or_recover(
+            self.consecutive_failures.as_ref(),
+            "CircuitBreaker.consecutive_failures",
+        );
+        let mut history = crate::utils::lock_or_recover(
+            self.request_history.as_ref(),
+            "CircuitBreaker.request_history",
+        );
+
         // 记录到历史
         history.push((Instant::now(), false));
         self.cleanup_old_history(&mut history);
-        
+
         match *state_guard {
             CircuitBreakerState::Closed => {
                 *failures += 1;
-                
+
                 // 检查是否达到失败阈值
                 if *failures >= self.config.failure_threshold {
                     // 打开熔断器
                     *state_guard = CircuitBreakerState::Open;
-                    let mut opened_at = self.opened_at.lock().unwrap();
+                    let mut opened_at = crate::utils::lock_or_recover(
+                        self.opened_at.as_ref(),
+                        "CircuitBreaker.opened_at",
+                    );
                     *opened_at = Some(Instant::now());
                 }
             }
             CircuitBreakerState::HalfOpen => {
                 // 半开状态下失败，立即打开熔断器
                 *state_guard = CircuitBreakerState::Open;
-                let mut opened_at = self.opened_at.lock().unwrap();
+                let mut opened_at = crate::utils::lock_or_recover(
+                    self.opened_at.as_ref(),
+                    "CircuitBreaker.opened_at",
+                );
                 *opened_at = Some(Instant::now());
                 *failures = self.config.failure_threshold;
             }
             CircuitBreakerState::Open => {
                 // 已经打开，更新打开时间
-                let mut opened_at = self.opened_at.lock().unwrap();
+                let mut opened_at = crate::utils::lock_or_recover(
+                    self.opened_at.as_ref(),
+                    "CircuitBreaker.opened_at",
+                );
                 *opened_at = Some(Instant::now());
             }
         }
@@ -163,25 +258,32 @@ impl CircuitBreaker {
 
     /// 获取当前状态
     pub fn state(&self) -> CircuitBreakerState {
-        *self.state.lock().unwrap()
+        *crate::utils::lock_or_recover(self.state.as_ref(), "CircuitBreaker.state")
     }
 
     /// 获取失败率（时间窗口内）
+    #[allow(dead_code)]
     pub fn failure_rate(&self) -> f64 {
-        let history = self.request_history.lock().unwrap();
+        let history = crate::utils::lock_or_recover(
+            self.request_history.as_ref(),
+            "CircuitBreaker.request_history",
+        );
         let now = Instant::now();
         let window_start = now - self.config.time_window;
-        
+
         let recent_requests: Vec<_> = history
             .iter()
             .filter(|(time, _)| *time >= window_start)
             .collect();
-        
+
         if recent_requests.len() < self.config.min_requests as usize {
             return 0.0; // 请求数不足，返回 0
         }
-        
-        let failures = recent_requests.iter().filter(|(_, success)| !*success).count();
+
+        let failures = recent_requests
+            .iter()
+            .filter(|(_, success)| !*success)
+            .count();
         failures as f64 / recent_requests.len() as f64
     }
 
@@ -217,20 +319,22 @@ impl RateLimiter {
     }
 
     /// 检查是否允许请求（消耗一个令牌）
+    #[allow(dead_code)]
     pub fn allow(&self) -> bool {
-        let mut tokens = self.tokens.lock().unwrap();
-        let mut last_update = self.last_update.lock().unwrap();
+        let mut tokens = crate::utils::lock_or_recover(self.tokens.as_ref(), "RateLimiter.tokens");
+        let mut last_update =
+            crate::utils::lock_or_recover(self.last_update.as_ref(), "RateLimiter.last_update");
         let now = Instant::now();
-        
+
         // 计算应该生成的令牌数
         let elapsed = now.duration_since(*last_update);
         let tokens_to_add = (elapsed.as_secs_f64() * self.rate) as u32;
-        
+
         if tokens_to_add > 0 {
             *tokens = (*tokens + tokens_to_add).min(self.capacity);
             *last_update = now;
         }
-        
+
         // 检查是否有可用令牌
         if *tokens > 0 {
             *tokens -= 1;
@@ -241,20 +345,22 @@ impl RateLimiter {
     }
 
     /// 获取当前可用令牌数
+    #[allow(dead_code)]
     pub fn available_tokens(&self) -> u32 {
-        let mut tokens = self.tokens.lock().unwrap();
-        let mut last_update = self.last_update.lock().unwrap();
+        let mut tokens = crate::utils::lock_or_recover(self.tokens.as_ref(), "RateLimiter.tokens");
+        let mut last_update =
+            crate::utils::lock_or_recover(self.last_update.as_ref(), "RateLimiter.last_update");
         let now = Instant::now();
-        
+
         // 更新令牌数
         let elapsed = now.duration_since(*last_update);
         let tokens_to_add = (elapsed.as_secs_f64() * self.rate) as u32;
-        
+
         if tokens_to_add > 0 {
             *tokens = (*tokens + tokens_to_add).min(self.capacity);
             *last_update = now;
         }
-        
+
         *tokens
     }
 }

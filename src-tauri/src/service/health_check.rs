@@ -4,6 +4,7 @@ use crate::service::trait_def::HealthStatus;
 
 /// 健康检查级别
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum HealthCheckLevel {
     /// L0: 进程是否存在（最快，< 1ms）
     ProcessCheck,
@@ -25,8 +26,9 @@ impl HealthCheckLevel {
             HealthCheckLevel::FullCheck => std::time::Duration::from_millis(2000),
         }
     }
-    
+
     /// 根据服务状态选择检查级别
+    #[allow(dead_code)]
     pub fn for_state(state: ServiceState) -> Self {
         match state {
             ServiceState::Stopped | ServiceState::Starting => HealthCheckLevel::ProcessCheck,
@@ -73,13 +75,15 @@ impl HealthCheckStrategy {
             skip_on_busy: true,
         }
     }
-    
+
     /// 标准策略
+    #[allow(dead_code)]
     pub fn standard() -> Self {
         Self::default()
     }
-    
+
     /// 深度策略（低频检查，深度检测）
+    #[allow(dead_code)]
     pub fn deep() -> Self {
         Self {
             default_level: HealthCheckLevel::FullCheck,
@@ -110,10 +114,10 @@ impl HealthCheckResult {
             timestamp: std::time::Instant::now(),
         }
     }
-    
+
+    #[allow(dead_code)]
     pub fn with_message(mut self, message: String) -> Self {
         self.message = Some(message);
         self
     }
 }
-

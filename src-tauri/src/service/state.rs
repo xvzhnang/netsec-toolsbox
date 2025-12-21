@@ -1,5 +1,5 @@
 /// 统一的服务状态机（不绑定任何业务）
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 /// 服务状态枚举（统一所有服务的状态）
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -32,28 +32,41 @@ impl ServiceState {
         let config = crate::service::state_transition::StateTransitionConfig::default();
         config.can_transit(from, to)
     }
-    
+
     /// 检查状态转换是否合法（使用自定义配置）
-    pub fn can_transit_with_config(from: ServiceState, to: ServiceState, config: &crate::service::state_transition::StateTransitionConfig) -> bool {
+    #[allow(dead_code)]
+    pub fn can_transit_with_config(
+        from: ServiceState,
+        to: ServiceState,
+        config: &crate::service::state_transition::StateTransitionConfig,
+    ) -> bool {
         config.can_transit(from, to)
     }
-    
+
     /// 检查是否可用（可接受请求）
     pub fn is_available(&self) -> bool {
-        matches!(self, ServiceState::Idle | ServiceState::Degraded | ServiceState::Busy)
+        matches!(
+            self,
+            ServiceState::Idle | ServiceState::Degraded | ServiceState::Busy
+        )
     }
-    
+
     /// 检查是否健康（可用于调度）
     pub fn is_healthy(&self) -> bool {
-        matches!(self, ServiceState::Idle | ServiceState::Busy | ServiceState::Degraded)
+        matches!(
+            self,
+            ServiceState::Idle | ServiceState::Busy | ServiceState::Degraded
+        )
     }
-    
+
     /// 检查是否忙碌
+    #[allow(dead_code)]
     pub fn is_busy(&self) -> bool {
         matches!(self, ServiceState::Busy)
     }
-    
+
     /// 检查是否处于错误状态
+    #[allow(dead_code)]
     pub fn is_error(&self) -> bool {
         matches!(self, ServiceState::Unhealthy | ServiceState::Stopped)
     }
@@ -81,4 +94,3 @@ impl std::fmt::Display for ServiceState {
         write!(f, "{}", s)
     }
 }
-

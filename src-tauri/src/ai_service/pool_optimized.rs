@@ -112,18 +112,21 @@ impl Default for OptimizedWorkerMetrics {
 impl OptimizedWorkerMetrics {
     pub fn record_success(&self) {
         self.consecutive_failures.store(0, Ordering::Relaxed);
-        *self.last_success.lock().unwrap() = Some(Instant::now());
-        *self.recent_fail_rate.lock().unwrap() = (*self.recent_fail_rate.lock().unwrap() * 0.9).max(0.0);
+        *crate::utils::lock_or_recover(self.last_success.as_ref(), "OptimizedWorkerMetrics.last_success") =
+            Some(Instant::now());
+        let mut rate = crate::utils::lock_or_recover(self.recent_fail_rate.as_ref(), "OptimizedWorkerMetrics.recent_fail_rate");
+        *rate = (*rate * 0.9).max(0.0);
     }
     
     pub fn record_failure(&self) {
         self.consecutive_failures.fetch_add(1, Ordering::Relaxed);
-        let mut rate = self.recent_fail_rate.lock().unwrap();
+        let mut rate = crate::utils::lock_or_recover(self.recent_fail_rate.as_ref(), "OptimizedWorkerMetrics.recent_fail_rate");
         *rate = (*rate * 0.9 + 0.1).min(1.0);
     }
     
     pub fn update_heartbeat(&self) {
-        *self.last_heartbeat.lock().unwrap() = Some(Instant::now());
+        *crate::utils::lock_or_recover(self.last_heartbeat.as_ref(), "OptimizedWorkerMetrics.last_heartbeat") =
+            Some(Instant::now());
     }
 }
 
@@ -181,12 +184,11 @@ impl OptimizedWorker {
     /// 无 HTTP 健康检查：基于进程状态和心跳
     pub fn health_check_no_http(&self) -> bool {
         // 1. 检查进程是否存在且运行
-        let process_guard = self.process.lock().unwrap();
-        if process_guard.is_none() {
-            return false;
-        }
-        
-        let child = process_guard.as_ref().unwrap();
+        let process_guard = crate::utils::lock_or_recover(self.process.as_ref(), "OptimizedWorker.process");
+        let child = match process_guard.as_ref() {
+            Some(child) => child,
+            None => return false,
+        };
         match child.try_wait() {
             Ok(Some(_)) => {
                 // 进程已退出
@@ -202,7 +204,10 @@ impl OptimizedWorker {
         drop(process_guard);
         
         // 2. 检查心跳（从 stderr 读取的 [READY] 消息）
-        let heartbeat_guard = self.metrics.last_heartbeat.lock().unwrap();
+        let heartbeat_guard = crate::utils::lock_or_recover(
+            self.metrics.last_heartbeat.as_ref(),
+            "OptimizedWorkerMetrics.last_heartbeat",
+        );
         if let Some(last_heartbeat) = *heartbeat_guard {
             // 如果超过 30 秒没有心跳，认为不健康
             if last_heartbeat.elapsed() > Duration::from_secs(30) {
@@ -210,7 +215,7 @@ impl OptimizedWorker {
             }
         } else {
             // 如果从未收到心跳，检查启动时间
-            let started_guard = self.started_at.lock().unwrap();
+            let started_guard = crate::utils::lock_or_recover(self.started_at.as_ref(), "OptimizedWorker.started_at");
             if let Some(started_at) = *started_guard {
                 // 如果启动超过 60 秒还没有心跳，认为不健康
                 if started_at.elapsed() > Duration::from_secs(60) {
@@ -252,7 +257,7 @@ impl ModelListCache {
     
     /// 获取缓存的模型列表（如果有效）
     pub fn get_cached(&self) -> Option<Vec<String>> {
-        let guard = self.models.lock().unwrap();
+        let guard = crate::utils::lock_or_recover(self.models.as_ref(), "ModelListCache.models");
         if let Some((models, cached_at)) = guard.as_ref() {
             if cached_at.elapsed() < self.cache_ttl {
                 return Some(models.clone());
@@ -263,7 +268,7 @@ impl ModelListCache {
     
     /// 检查是否可以请求（限频）
     pub fn can_request(&self) -> bool {
-        let guard = self.last_request.lock().unwrap();
+        let guard = crate::utils::lock_or_recover(self.last_request.as_ref(), "ModelListCache.last_request");
         if let Some(last) = *guard {
             last.elapsed() >= self.min_request_interval
         } else {
@@ -273,8 +278,8 @@ impl ModelListCache {
     
     /// 更新缓存
     pub fn update_cache(&self, models: Vec<String>) {
-        *self.models.lock().unwrap() = Some((models, Instant::now()));
-        *self.last_request.lock().unwrap() = Some(Instant::now());
+        *crate::utils::lock_or_recover(self.models.as_ref(), "ModelListCache.models") = Some((models, Instant::now()));
+        *crate::utils::lock_or_recover(self.last_request.as_ref(), "ModelListCache.last_request") = Some(Instant::now());
     }
 }
 
@@ -301,7 +306,7 @@ impl OptimizedGatewayPool {
     /// 确保只初始化一次
     pub fn ensure_initialized(pool_size: usize, base_port: u16) -> Result<(), String> {
         let instance = Self::get_instance();
-        let mut guard = instance.lock().unwrap();
+        let mut guard = crate::utils::lock_or_recover(instance.as_ref(), "OptimizedGatewayPool.INSTANCE");
         
         if guard.is_some() {
             return Ok(()); // 已初始化
@@ -384,7 +389,7 @@ impl OptimizedGatewayPool {
             .map_err(|e| format!("启动 Worker-{} 失败: {}", worker.id, e))?;
         
         // 记录启动时间
-        *worker.started_at.lock().unwrap() = Some(Instant::now());
+        *crate::utils::lock_or_recover(worker.started_at.as_ref(), "OptimizedWorker.started_at") = Some(Instant::now());
         worker.set_state(OptimizedWorkerState::Init);
         
         // 启动后台线程读取 stderr（检测 READY 状态）
@@ -433,7 +438,7 @@ impl OptimizedGatewayPool {
             }
         }
         
-        *worker.process.lock().unwrap() = Some(child);
+        *crate::utils::lock_or_recover(worker.process.as_ref(), "OptimizedWorker.process") = Some(child);
         
         Ok(format!("Worker-{} 已启动在端口 {}", worker.id, worker.port))
     }
@@ -460,7 +465,10 @@ impl OptimizedGatewayPool {
                         if worker.status() == OptimizedWorkerState::Unhealthy {
                             worker.set_state(OptimizedWorkerState::Idle);
                             worker.circuit_breaker_open.store(false, Ordering::Relaxed);
-                            *worker.circuit_breaker_opened_at.lock().unwrap() = None;
+                            *crate::utils::lock_or_recover(
+                                worker.circuit_breaker_opened_at.as_ref(),
+                                "OptimizedWorker.circuit_breaker_opened_at",
+                            ) = None;
                         }
                     } else {
                         worker.metrics.record_failure();
@@ -468,7 +476,10 @@ impl OptimizedGatewayPool {
                         
                         if failures >= 5 {
                             worker.circuit_breaker_open.store(true, Ordering::Relaxed);
-                            *worker.circuit_breaker_opened_at.lock().unwrap() = Some(Instant::now());
+                            *crate::utils::lock_or_recover(
+                                worker.circuit_breaker_opened_at.as_ref(),
+                                "OptimizedWorker.circuit_breaker_opened_at",
+                            ) = Some(Instant::now());
                             worker.set_state(OptimizedWorkerState::Unhealthy);
                             log::warn!("[Optimized Pool] Worker-{} 连续失败 {} 次，标记为 Unhealthy", idx, failures);
                         } else if worker.status() != OptimizedWorkerState::Unhealthy {

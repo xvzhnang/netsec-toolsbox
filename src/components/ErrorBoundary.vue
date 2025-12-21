@@ -14,7 +14,7 @@ const hasError = ref(false)
 const error = ref<Error | null>(null)
 
 // 捕获子组件的错误
-onErrorCaptured((err: Error, instance: ComponentPublicInstance | null, info: string) => {
+onErrorCaptured((err: Error, _instance: ComponentPublicInstance | null, info: string) => {
   hasError.value = true
   error.value = err
   logError('ErrorBoundary caught an error:', err, info)

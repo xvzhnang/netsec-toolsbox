@@ -1,8 +1,9 @@
+use crate::ai_service::pool::WorkerState;
 /// Service 相关的辅助函数
 use crate::service::state::ServiceState;
-use crate::ai_service::pool::WorkerState;
 
 /// 将 WorkerState 转换为 ServiceState（用于 GatewayPoolService）
+#[allow(dead_code)]
 pub fn worker_state_to_service_state(worker_state: WorkerState) -> ServiceState {
     match worker_state {
         WorkerState::Init => ServiceState::Starting,
@@ -10,18 +11,22 @@ pub fn worker_state_to_service_state(worker_state: WorkerState) -> ServiceState 
         WorkerState::Idle => ServiceState::Idle,
         WorkerState::BusyStreaming | WorkerState::BusyBlocked => ServiceState::Busy,
         WorkerState::Degraded => ServiceState::Degraded,
-        WorkerState::Unhealthy | WorkerState::Dead => ServiceState::Unhealthy,
+        WorkerState::Unhealthy
+        | WorkerState::Dead
+        | WorkerState::FailedPermanent
+        | WorkerState::Disabled => ServiceState::Unhealthy,
         WorkerState::Restarting => ServiceState::Restarting,
     }
 }
 
 /// 检查服务状态是否应该触发自动恢复
+#[allow(dead_code)]
 pub fn should_auto_recover(state: ServiceState) -> bool {
     matches!(state, ServiceState::Unhealthy | ServiceState::Stopped)
 }
 
 /// 检查服务状态是否应该触发告警
+#[allow(dead_code)]
 pub fn should_alert(state: ServiceState) -> bool {
     matches!(state, ServiceState::Unhealthy | ServiceState::Restarting)
 }
-

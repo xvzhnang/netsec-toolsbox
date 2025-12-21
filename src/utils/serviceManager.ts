@@ -153,17 +153,17 @@ export function getServiceStateText(state: ServiceStateValue): string {
  */
 export function getServiceStateColor(state: ServiceStateValue): string {
   const colorMap: Record<ServiceStateValue, string> = {
-    stopped: '#gray',
-    starting: '#blue',
-    warmup: '#yellow',
-    idle: '#green',
-    busy: '#blue',
-    degraded: '#orange',
-    unhealthy: '#red',
-    restarting: '#purple',
-    stopping: '#gray',
+    stopped: '#9ca3af',
+    starting: '#3b82f6',
+    warmup: '#f59e0b',
+    idle: '#10b981',
+    busy: '#3b82f6',
+    degraded: '#f97316',
+    unhealthy: '#ef4444',
+    restarting: '#8b5cf6',
+    stopping: '#9ca3af',
   }
-  return colorMap[state] || '#gray'
+  return colorMap[state] || '#9ca3af'
 }
 
 /**

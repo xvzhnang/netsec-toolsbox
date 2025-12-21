@@ -133,6 +133,9 @@ export async function recordRequest(metrics: RequestMetrics): Promise<void> {
   }
   
   const stats = data.modelStats[metrics.model]
+  if (!stats) {
+    return
+  }
   stats.requestCount++
   stats.lastUsed = metrics.timestamp
   
@@ -199,7 +202,6 @@ export async function getPerformanceSummary(): Promise<{
   
   const allStats = Object.values(data.modelStats)
   const totalSuccess = allStats.reduce((sum, s) => sum + s.successCount, 0)
-  const totalFailures = allStats.reduce((sum, s) => sum + s.failureCount, 0)
   const totalResponseTime = allStats.reduce((sum, s) => sum + s.totalResponseTime, 0)
   const totalSuccessCount = totalSuccess
   

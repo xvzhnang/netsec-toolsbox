@@ -13,7 +13,7 @@ let mdInstance: any = null
 
 // Debug 开关：控制是否输出详细日志
 // 生产环境可以设置为 false，减少控制台输出
-const DEBUG = true
+const DEBUG = false
 
 // 调试日志函数
 const debugLog = (...args: any[]) => {

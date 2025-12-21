@@ -28,7 +28,12 @@
         :class="msg.role"
       >
         <div class="bubble">
-          <p>{{ msg.text }}</p>
+          <div
+            v-if="msg.role === 'assistant'"
+            class="ai-markdown"
+            v-html="msg.html || ''"
+          ></div>
+          <p v-else class="plain">{{ msg.text }}</p>
         </div>
       </div>
     </main>
@@ -99,10 +104,16 @@
 
 <script setup lang="ts">
 import { ref, nextTick, onMounted, onUnmounted, watch } from 'vue'
+import MarkdownIt from 'markdown-it'
+import type { Options } from 'markdown-it/lib/index.mjs'
+import type Token from 'markdown-it/lib/token.mjs'
+import type Renderer from 'markdown-it/lib/renderer.mjs'
+import type { RenderRule } from 'markdown-it/lib/renderer.mjs'
+import hljs from 'highlight.js'
+import 'highlight.js/styles/github-dark.css'
 import { 
   sendAIChat, 
   sendAIChatStream,
-  checkAIServiceHealth, 
   getAvailableModels, 
   waitForAIService, 
   startAIService,
@@ -117,7 +128,6 @@ import {
   addMessageToSession,
   updateSessionMessage,
   clearChatHistory,
-  type ChatMessage,
   type ChatSession
 } from '../utils/aiHistory'
 import { debug, error as logError, info, warn } from '../utils/logger'
@@ -128,13 +138,15 @@ let checkInterval: ReturnType<typeof setInterval> | undefined = undefined
 
 // 配置更新事件处理函数（需要在 onUnmounted 中移除）
 let handleConfigUpdate: (() => void) | null = null
+let handleVisibilityChange: (() => void) | null = null
 
-type Role = 'user' | 'assistant'
+type Role = 'user' | 'assistant' | 'system'
 
 interface Message {
   id: number
   role: Role
   text: string
+  html?: string
   timestamp?: number
   usage?: {
     prompt_tokens?: number
@@ -179,12 +191,96 @@ const messages = ref<Message[]>([
     id: 1,
     role: 'assistant',
     text: '正在连接 AI Gateway 服务...',
+    html: '',
   },
 ])
 
 const containerRef = ref<HTMLElement | null>(null)
 
 let idCounter = 2
+
+let markdown: MarkdownIt
+markdown = new MarkdownIt({
+  html: false,
+  linkify: true,
+  breaks: true,
+  highlight: (code: string, language: string, attrs: string): string => {
+    void attrs
+    const lang = (language || '').trim().toLowerCase()
+    if (lang && hljs.getLanguage(lang)) {
+      const highlighted = hljs.highlight(code, { language: lang, ignoreIllegals: true }).value
+      return `<pre class="hljs"><code class="hljs language-${markdown.utils.escapeHtml(lang)}">${highlighted}</code></pre>`
+    }
+    return `<pre class="hljs"><code class="hljs">${markdown.utils.escapeHtml(code)}</code></pre>`
+  },
+})
+
+markdown.validateLink = (url: string): boolean => {
+  const normalized = url.trim().toLowerCase()
+  if (normalized.startsWith('#') || normalized.startsWith('/')) return true
+  return (
+    normalized.startsWith('http://') ||
+    normalized.startsWith('https://') ||
+    normalized.startsWith('mailto:')
+  )
+}
+
+const defaultLinkOpen: RenderRule =
+  markdown.renderer.rules.link_open ??
+  ((tokens: Token[], idx: number, options: Options, env: any, self: Renderer): string => {
+    void env
+    return self.renderToken(tokens, idx, options)
+  })
+
+markdown.renderer.rules.link_open = (
+  tokens: Token[],
+  idx: number,
+  options: Options,
+  env: any,
+  self: Renderer
+): string => {
+  void env
+  const token = tokens[idx]
+  if (token) {
+    token.attrSet('rel', 'noopener noreferrer')
+    token.attrSet('target', '_blank')
+  }
+  return defaultLinkOpen(tokens, idx, options, env, self)
+}
+
+const renderAssistantMarkdown = (text: string): string => {
+  return markdown.render(text || '')
+}
+
+const renderThrottleMs = 60
+const lastRenderAtByMessageId = new Map<number, number>()
+
+const maybeUpdateAssistantHtml = (msg: Message, force: boolean = false) => {
+  if (msg.role !== 'assistant') return
+  const now = Date.now()
+  const last = lastRenderAtByMessageId.get(msg.id) ?? 0
+  if (!force && now - last < renderThrottleMs) return
+  msg.html = renderAssistantMarkdown(msg.text)
+  lastRenderAtByMessageId.set(msg.id, now)
+}
+
+const SERVICE_POLL_INTERVAL_MS = 8000
+
+const stopPeriodicServiceCheck = () => {
+  if (checkInterval) {
+    clearInterval(checkInterval)
+    checkInterval = undefined
+  }
+}
+
+const startPeriodicServiceCheck = () => {
+  if (checkInterval) return
+  checkInterval = setInterval(() => {
+    if (!isLoading.value) {
+      checkService(100)
+    }
+  }, SERVICE_POLL_INTERVAL_MS)
+}
 
 // 获取模型显示名称
 const getModelDisplayName = (modelId: string): string => {
@@ -281,6 +377,7 @@ const checkService = async (delayMs: number = 0) => {
         // 更新欢迎消息
         if (messages.value.length === 1 && messages.value[0]?.text === '正在连接 AI Gateway 服务...') {
           messages.value[0].text = '🤖 AI 安全助手已就绪！我可以帮助你分析安全工具、提供攻防思路、命令示例等。'
+          maybeUpdateAssistantHtml(messages.value[0]!, true)
         }
       } catch (error) {
         debug('[服务状态检测] ⚠️ 获取模型列表失败，但服务可能仍在运行')
@@ -307,6 +404,7 @@ const checkService = async (delayMs: number = 0) => {
       // currentModel.value = ''
       if (messages.value.length === 1 && messages.value[0]?.text === '正在连接 AI Gateway 服务...') {
         messages.value[0].text = '⚠️ AI Gateway 服务未启动，请确保服务正在运行。'
+        maybeUpdateAssistantHtml(messages.value[0]!, true)
       }
     }
   } finally {
@@ -322,11 +420,13 @@ const initSession = async () => {
       const session = history.sessions.find(s => s.id === history.currentSessionId)
       if (session && session.messages.length > 0) {
         currentSession.value = session
+        lastRenderAtByMessageId.clear()
         // 加载消息
         messages.value = session.messages.map(msg => ({
           id: msg.id,
           role: msg.role,
           text: msg.text,
+          html: msg.role === 'assistant' ? renderAssistantMarkdown(msg.text) : undefined,
           timestamp: msg.timestamp,
           usage: msg.usage,
         }))
@@ -469,6 +569,7 @@ const send = async () => {
     id: assistantMsgId,
     role: 'assistant',
     text: '',
+    html: '',
     timestamp: Date.now(),
   }
   messages.value.push(loadingMsg)
@@ -517,6 +618,7 @@ const send = async () => {
                 const msg = messages.value[index]
                 if (msg) {
                   msg.text = fullContent
+                  maybeUpdateAssistantHtml(msg)
                   nextTick(() => scrollToBottom())
                 }
               }
@@ -531,6 +633,7 @@ const send = async () => {
               const msg = messages.value[index]
               if (msg) {
                 msg.text = fullContent || '无响应'
+                maybeUpdateAssistantHtml(msg, true)
                 msg.usage = usage
                 
                 // 更新性能统计
@@ -592,6 +695,7 @@ const send = async () => {
                   errorText = '❌ 无法连接到 AI Gateway 服务，请检查服务是否正在运行'
                 }
                 msg.text = errorText
+                maybeUpdateAssistantHtml(msg, true)
               }
             }
             isLoading.value = false
@@ -629,6 +733,7 @@ const send = async () => {
         if (msg) {
           const content = response.choices[0]?.message?.content || '无响应'
           msg.text = content
+          maybeUpdateAssistantHtml(msg, true)
           msg.usage = response.usage
           
           // 更新性能统计
@@ -687,6 +792,7 @@ const send = async () => {
           errorText = '❌ 无法连接到 AI Gateway 服务，请检查服务是否正在运行'
         }
         msg.text = errorText
+        maybeUpdateAssistantHtml(msg, true)
       }
     }
     isLoading.value = false
@@ -760,11 +866,13 @@ const clearHistory = async () => {
   if (confirm('确定要清空所有聊天历史吗？')) {
     await clearChatHistory()
     currentSession.value = null
+    lastRenderAtByMessageId.clear()
     messages.value = [
       {
         id: 1,
         role: 'assistant',
         text: '🤖 AI 安全助手已就绪！我可以帮助你分析安全工具、提供攻防思路、命令示例等。',
+        html: renderAssistantMarkdown('🤖 AI 安全助手已就绪！我可以帮助你分析安全工具、提供攻防思路、命令示例等。'),
       },
     ]
     idCounter = 2
@@ -775,7 +883,10 @@ const clearHistory = async () => {
     if (isServiceAvailable.value && availableModels.value.length > 0) {
       // 如果当前模型不在可用列表中，选择第一个可用模型
       if (!availableModels.value.includes(currentModel.value)) {
-        currentModel.value = availableModels.value[0]
+        const firstModel = availableModels.value[0]
+        if (firstModel) {
+          currentModel.value = firstModel
+        }
       }
     } else {
       // 如果服务不可用，尝试重新检查服务状态
@@ -795,6 +906,9 @@ watch(currentModel, async () => {
 })
 
 onMounted(async () => {
+  if (messages.value[0]) {
+    maybeUpdateAssistantHtml(messages.value[0], true)
+  }
   // 加载聊天历史（不阻塞）
   initSession().catch(error => {
     logError('初始化会话失败:', error)
@@ -835,14 +949,7 @@ onMounted(async () => {
   
   // 定期检查服务状态和模型列表（缩短间隔以更快响应配置变化）
   // 注意：避免在请求处理期间频繁检查，增加延迟以避免误判
-  checkInterval = setInterval(() => {
-    // 如果正在加载，跳过本次检查（避免干扰）
-    if (!isLoading.value) {
-      checkService(100) // 添加 100ms 延迟，避免在事件循环关闭瞬间检查
-    } else {
-      debug('[定期检查] 跳过本次检查（正在处理请求）')
-    }
-  }, 3000)
+  startPeriodicServiceCheck()
   
   // 监听配置更新事件，实时刷新模型列表
   handleConfigUpdate = () => {
@@ -853,6 +960,16 @@ onMounted(async () => {
   }
   
   window.addEventListener('ai-config-updated', handleConfigUpdate)
+
+  handleVisibilityChange = () => {
+    if (document.hidden) {
+      stopPeriodicServiceCheck()
+      return
+    }
+    startPeriodicServiceCheck()
+    checkService().catch(() => {})
+  }
+  document.addEventListener('visibilitychange', handleVisibilityChange)
   
   // 定期保存消息（防抖）
   let saveTimer: ReturnType<typeof setTimeout> | null = null
@@ -879,15 +996,18 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
-  if (checkInterval) {
-    clearInterval(checkInterval)
-  }
+  stopPeriodicServiceCheck()
   document.removeEventListener('click', handleClickOutside)
   
   // 移除配置更新事件监听
   if (handleConfigUpdate) {
     window.removeEventListener('ai-config-updated', handleConfigUpdate)
     handleConfigUpdate = null
+  }
+
+  if (handleVisibilityChange) {
+    document.removeEventListener('visibilitychange', handleVisibilityChange)
+    handleVisibilityChange = null
   }
   
   // 保存最终状态
@@ -1008,14 +1128,132 @@ onUnmounted(() => {
 }
 
 .msg-row.assistant .bubble {
-  background: #252526;
+  background: linear-gradient(180deg, #252526 0%, #1f1f20 100%);
   border: 1px solid rgba(255, 255, 255, 0.1);
   color: #cccccc;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
 }
 
-.bubble p {
+.bubble .plain {
   margin: 0;
+  white-space: pre-wrap;
+}
+
+.msg-row.assistant .bubble .ai-markdown {
+  font-size: 13.5px;
+  line-height: 1.65;
+}
+
+.msg-row.assistant .bubble .ai-markdown :deep(h1),
+.msg-row.assistant .bubble .ai-markdown :deep(h2),
+.msg-row.assistant .bubble .ai-markdown :deep(h3),
+.msg-row.assistant .bubble .ai-markdown :deep(h4),
+.msg-row.assistant .bubble .ai-markdown :deep(h5),
+.msg-row.assistant .bubble .ai-markdown :deep(h6) {
+  margin: 0.8em 0 0.5em;
+  font-weight: 650;
+  color: #e6edf3;
+}
+
+.msg-row.assistant .bubble .ai-markdown :deep(h1) { font-size: 1.25em; }
+.msg-row.assistant .bubble .ai-markdown :deep(h2) { font-size: 1.18em; }
+.msg-row.assistant .bubble .ai-markdown :deep(h3) { font-size: 1.1em; }
+.msg-row.assistant .bubble .ai-markdown :deep(h4) { font-size: 1.04em; }
+.msg-row.assistant .bubble .ai-markdown :deep(h5) { font-size: 1.0em; }
+.msg-row.assistant .bubble .ai-markdown :deep(h6) { font-size: 0.96em; opacity: 0.95; }
+
+.msg-row.assistant .bubble .ai-markdown :deep(p) {
+  margin: 0.6em 0;
+}
+
+.msg-row.assistant .bubble .ai-markdown :deep(p:first-child) {
+  margin-top: 0;
+}
+
+.msg-row.assistant .bubble .ai-markdown :deep(p:last-child) {
+  margin-bottom: 0;
+}
+
+.msg-row.assistant .bubble .ai-markdown :deep(ul),
+.msg-row.assistant .bubble .ai-markdown :deep(ol) {
+  padding-left: 1.4em;
+  margin: 0.6em 0;
+}
+
+.msg-row.assistant .bubble .ai-markdown :deep(li) {
+  margin: 0.25em 0;
+}
+
+.msg-row.assistant .bubble .ai-markdown :deep(blockquote) {
+  margin: 0.8em 0;
+  padding: 0.2em 0 0.2em 0.8em;
+  border-left: 3px solid rgba(0, 122, 204, 0.7);
+  color: rgba(204, 204, 204, 0.9);
+}
+
+.msg-row.assistant .bubble .ai-markdown :deep(code:not(pre code)) {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 0.05em 0.35em;
+  border-radius: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 0.95em;
+}
+
+.msg-row.assistant .bubble .ai-markdown :deep(pre) {
+  margin: 0.8em 0;
+  padding: 10px 12px;
+  background: #0d1117;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  overflow-x: auto;
+}
+
+.msg-row.assistant .bubble .ai-markdown :deep(pre code) {
+  background: transparent;
+  border: none;
+  padding: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 12.5px;
+  line-height: 1.6;
+  display: block;
+}
+
+.msg-row.assistant .bubble .ai-markdown :deep(img) {
+  max-width: 100%;
+  height: auto;
+  border-radius: 10px;
+  margin: 0.6em 0;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.msg-row.assistant .bubble .ai-markdown :deep(a) {
+  color: #4fc1ff;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.msg-row.assistant .bubble .ai-markdown :deep(hr) {
+  border: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  margin: 0.9em 0;
+}
+
+.msg-row.assistant .bubble .ai-markdown :deep(table) {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.8em 0;
+}
+
+.msg-row.assistant .bubble .ai-markdown :deep(th),
+.msg-row.assistant .bubble .ai-markdown :deep(td) {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  padding: 6px 8px;
+}
+
+.msg-row.assistant .bubble .ai-markdown :deep(th) {
+  background: rgba(255, 255, 255, 0.05);
+  font-weight: 600;
 }
 
 .input-area {

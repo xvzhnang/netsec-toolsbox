@@ -110,8 +110,8 @@
 - **路由**：Vue Router 4
 - **数据存储**：JSON 配置文件
 - **图标处理**：PowerShell/.NET（Windows）、image crate（Rust）
-- **Markdown 渲染**：markdown-it（npm 包，打包到 bundle，包含多个插件）
-- **代码高亮**：highlight.js（本地加载，位于 `public/highlight.js-11.11.1/`）
+- **Markdown 渲染**：Wiki 使用本地 `markdown-it` bundle（`public/markdown-it/`）；AI 聊天消息使用 `markdown-it`（npm）
+- **代码高亮**：highlight.js（Wiki 本地资源 + 聊天组件 npm 引入）
 - **数学公式**：KaTeX（本地加载，位于 `public/katex/`，自定义渲染逻辑）
 - **流程图**：Mermaid（npm 包，打包到 bundle）
 - **主题样式**：PinkFairy 暗色主题（自定义 CSS，基于 Typora See Yue Dark）
@@ -421,6 +421,22 @@ netsec-toolbox/
 - **launcher.rs**：工具启动逻辑（支持多种工具类型）
 - **icon_extractor.rs**：图标提取（Windows EXE/LNK、HTML、URL favicon）
 - **file_ops.rs**：文件操作（路径解析、文件对话框）
+
+### AI Gateway 服务（OpenAI 兼容）
+
+- OpenAI 兼容接口：`/v1/chat/completions`、`/v1/models`、`/health`
+- 连接池：全局单例（`OnceLock`），多 Worker 负载均衡与故障转移
+- Worker 就绪原子性：端口可用 + stderr `[READY]` + 模型就绪后才进入调度
+- 健康检查与自愈：进程状态 + 心跳 + `/health`，连续失败降级与重启（冷却 + 重启预算）
+- 熔断：每 Worker 独立熔断器，半开探测避免问题扩散
+- 日志降噪：模型不可用告警做全局去重
+
+### 稳定性与崩溃风险控制
+
+- Mutex：统一使用 `lock_or_recover` 处理 poisoned mutex，避免 `unwrap()` 触发 panic
+- 锁粒度：避免嵌套长时间持锁，把耗时操作移出锁区
+- 边界检查：对 `pool_size`、`worker_id`、数组索引做防御性校验
+- 进程管理：停止/重启包含超时与状态清理，避免端口占用与句柄泄漏
 
 ### 图标提取机制
 

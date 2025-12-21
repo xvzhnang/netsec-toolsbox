@@ -103,6 +103,7 @@ export interface ToolItem {
   name: string
   description?: string
   iconUrl?: string // 工具头像/图标 URL（原始路径，用于保存）
+  iconEmoji?: string
   _iconBase64?: string // 图标的 base64 数据（仅用于显示，不保存到 JSON）
   wikiUrl?: string
   toolType?: ToolType

@@ -1,6 +1,6 @@
-/// 统一的服务状态 DTO（供前端使用）
-use serde::{Serialize, Deserialize};
 use crate::service::state::ServiceState;
+/// 统一的服务状态 DTO（供前端使用）
+use serde::{Deserialize, Serialize};
 
 /// 服务状态 DTO（前端只认这个格式）
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -53,8 +53,9 @@ impl ServiceStatusDTO {
             eta_seconds: None,
         }
     }
-    
+
     /// 从 Service 创建 DTO（带自定义元数据）
+    #[allow(dead_code)]
     pub fn from_service_with_metadata(
         service: &dyn crate::service::trait_def::Service,
         metadata: serde_json::Value,
@@ -79,4 +80,3 @@ impl ServiceStatusDTO {
 pub struct ServiceStatusListDTO {
     pub services: Vec<ServiceStatusDTO>,
 }
-

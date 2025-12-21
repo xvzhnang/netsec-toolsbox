@@ -74,7 +74,7 @@ export async function openFileDialog(
         if (typeof result === 'string') {
           filePath = result
         } else if (Array.isArray(result) && result.length > 0) {
-          filePath = result[0]
+          filePath = result[0] ?? null
         }
         
         if (filePath) {

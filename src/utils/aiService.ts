@@ -550,6 +550,13 @@ export async function stopAIService(): Promise<void> {
   }
   
   try {
+    if (USE_POOL) {
+      try {
+        await invoker('stop_gateway_pool')
+      } catch (error) {
+        debug('停止连接池失败（可能未初始化）:', error)
+      }
+    }
     await invoker('stop_ai_service')
   } catch (error) {
     throw new Error(`停止 AI Gateway 服务失败: ${error instanceof Error ? error.message : String(error)}`)
@@ -569,16 +576,22 @@ export async function restartAIService(): Promise<void> {
     info('[服务恢复] 开始重启 AI Gateway 服务...')
     // 先停止服务
     try {
+      if (USE_POOL) {
+        await invoker('stop_gateway_pool')
+      }
       await invoker('stop_ai_service')
       debug('[服务恢复] 服务已停止')
-      // 等待一小段时间确保进程完全退出
       await new Promise(resolve => setTimeout(resolve, 500))
     } catch (error) {
       warn(`[服务恢复] 停止服务失败（可能服务未运行）: ${error instanceof Error ? error.message : String(error)}`)
     }
     
     // 然后启动服务
-    await invoker('start_ai_service')
+    if (USE_POOL) {
+      await invoker('init_gateway_pool')
+    } else {
+      await invoker('start_ai_service')
+    }
     info('[服务恢复] 服务已启动，等待服务就绪...')
     
     // 等待服务就绪（最多等待 10 秒）
@@ -611,6 +624,29 @@ export async function checkAIServiceStatus(): Promise<boolean> {
   }
   
   try {
+    if (USE_POOL) {
+      try {
+        const statusList = await invoker('get_gateway_pool_status') as Array<{
+          id: number
+          port: number
+          status: string
+        }>
+        const poolRunning = statusList.some(
+          s =>
+            s.status !== 'Dead' &&
+            s.status !== 'FailedPermanent' &&
+            s.status !== 'FATAL' &&
+            s.status !== 'Disabled' &&
+            s.status !== 'DISABLED'
+        )
+        if (poolRunning) {
+          return true
+        }
+      } catch (error) {
+        debug('检查连接池状态失败，降级到旧版状态检查:', error)
+      }
+    }
+
     const status = await invoker('check_ai_service_status') as boolean
     return status
   } catch (error) {
@@ -641,4 +677,3 @@ export async function waitForAIService(
   
   return false
 }
-

@@ -1662,7 +1662,6 @@ const loadKaTeXCSS = (): Promise<void> => {
     }
 
     const cssPaths = ['/katex/katex.min.css', '/katex/dist/katex.min.css']
-    let currentIndex = 0
 
     const tryLoadCSS = (index: number) => {
       if (index >= cssPaths.length) {
@@ -1671,11 +1670,17 @@ const loadKaTeXCSS = (): Promise<void> => {
         return
       }
 
+      const href = cssPaths[index]
+      if (!href) {
+        tryLoadCSS(index + 1)
+        return
+      }
+
       const link = document.createElement('link')
       link.rel = 'stylesheet'
-      link.href = cssPaths[index]
+      link.href = href
       link.onload = () => {
-        debug('KaTeX CSS 加载成功:', cssPaths[index])
+        debug('KaTeX CSS 加载成功:', href)
         resolve()
       }
       link.onerror = () => {
@@ -1775,7 +1780,7 @@ const cleanKaTeXFormula = (formula: string): string => {
     // 处理平方根：√x 或 √(x) 转换为 \sqrt{x}
     if (unicode === '√') {
       // 匹配 √ 后跟数字、字母或括号
-      formula = formula.replace(/√(\w+|\([^)]+\))/g, (match, content) => {
+      formula = formula.replace(/√(\w+|\([^)]+\))/g, (_match, content) => {
         // 如果内容在括号中，保留括号；否则添加括号
         if (content.startsWith('(')) {
           return `\\sqrt${content}`
@@ -1917,13 +1922,17 @@ const renderKaTeXFormulas = (container: HTMLElement) => {
           
           // 匹配块级公式（支持跨行，使用非贪婪匹配）
           const blockRegex = /\$\$([\s\S]*?)\$\$/g
-          let blockMatch
+          let blockMatch: RegExpExecArray | null
           const blockMatches: Array<{ match: string; formula: string; index: number }> = []
           
           // 重置正则表达式的 lastIndex
           blockRegex.lastIndex = 0
           while ((blockMatch = blockRegex.exec(text)) !== null) {
-            let formula = blockMatch[1].trim()
+            const captured = blockMatch[1]
+            if (captured === undefined) {
+              continue
+            }
+            let formula = captured.trim()
             // 清理公式：移除零宽空格和其他不可见字符
             formula = cleanKaTeXFormula(formula)
             if (formula) {
@@ -1938,8 +1947,9 @@ const renderKaTeXFormulas = (container: HTMLElement) => {
           // 从后往前处理块级公式
           if (blockMatches.length > 0) {
             // 如果整个段落就是一个块级公式，直接替换整个段落
-            if (blockMatches.length === 1 && trimmedText === blockMatches[0].match.trim()) {
-              const { formula } = blockMatches[0]
+            const only = blockMatches.length === 1 ? blockMatches[0] : undefined
+            if (only && trimmedText === only.match.trim()) {
+              const { formula } = only
               try {
                 const div = document.createElement('div')
                 div.className = 'katex-display'
@@ -1957,7 +1967,9 @@ const renderKaTeXFormulas = (container: HTMLElement) => {
               let modified = false
               
               for (let i = blockMatches.length - 1; i >= 0; i--) {
-                const { match, formula } = blockMatches[i]
+                const item = blockMatches[i]
+                if (!item) continue
+                const { match, formula } = item
                 try {
                   const div = document.createElement('div')
                   div.className = 'katex-display'
@@ -2026,11 +2038,15 @@ const renderKaTeXFormulas = (container: HTMLElement) => {
         
         // 处理行内公式 $...$（但要避免误识别）
         const inlineRegex = /\$([^$\n]+?)\$/g
-        let inlineMatch
+        let inlineMatch: RegExpExecArray | null
         const inlineMatches: Array<{ match: string; formula: string; index: number }> = []
         
         while ((inlineMatch = inlineRegex.exec(text)) !== null) {
-          let formula = inlineMatch[1].trim()
+          const captured = inlineMatch[1]
+          if (captured === undefined) {
+            continue
+          }
+          let formula = captured.trim()
           // 清理公式：移除零宽空格和其他不可见字符
           formula = cleanKaTeXFormula(formula)
           // 放宽验证条件：包含常见数学符号或上标/下标
@@ -2047,7 +2063,9 @@ const renderKaTeXFormulas = (container: HTMLElement) => {
         // 从后往前处理行内公式
         if (inlineMatches.length > 0) {
           for (let i = inlineMatches.length - 1; i >= 0; i--) {
-            const { match, formula, index } = inlineMatches[i]
+            const item = inlineMatches[i]
+            if (!item) continue
+            const { match, formula, index } = item
             try {
               const span = document.createElement('span')
               span.className = 'katex-inline'
@@ -4225,4 +4243,3 @@ onUnmounted(() => {
 /* 统一使用暗色主题，移除 prefers-color-scheme 媒体查询 */
 /* 所有样式已在上面统一定义为暗色主题（#020617 背景） */
 </style>
-

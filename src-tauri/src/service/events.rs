@@ -1,6 +1,6 @@
-/// 事件驱动架构（替代轮询）
-use serde::{Serialize, Deserialize};
 use crate::service::state::ServiceState;
+/// 事件驱动架构（替代轮询）
+use serde::{Deserialize, Serialize};
 
 /// 服务事件类型
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -25,20 +25,11 @@ pub enum ServiceEvent {
         timestamp: u64,
     },
     /// 启动事件
-    Started {
-        service_id: String,
-        timestamp: u64,
-    },
+    Started { service_id: String, timestamp: u64 },
     /// 停止事件
-    Stopped {
-        service_id: String,
-        timestamp: u64,
-    },
+    Stopped { service_id: String, timestamp: u64 },
     /// 重启事件
-    Restarted {
-        service_id: String,
-        timestamp: u64,
-    },
+    Restarted { service_id: String, timestamp: u64 },
 }
 
 /// 健康检查结果
@@ -65,11 +56,12 @@ impl EventBus {
             listeners: Vec::new(),
         }
     }
-    
+
+    #[allow(dead_code)]
     pub fn subscribe(&mut self, listener: Box<dyn EventListener>) {
         self.listeners.push(listener);
     }
-    
+
     pub fn emit(&self, event: &ServiceEvent) {
         for listener in &self.listeners {
             listener.on_event(event);
@@ -90,4 +82,3 @@ pub fn current_timestamp() -> u64 {
         .unwrap_or_default()
         .as_millis() as u64
 }
-

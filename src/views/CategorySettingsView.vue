@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, type Ref } from 'vue'
 import { categoriesConfig, syncCategoryConfigToData } from '@/stores/categories'
 
 interface SubCategoryConfig {
@@ -23,16 +23,16 @@ interface CategoryConfig {
 }
 
 // 使用 store 中的 categoriesConfig
-const categories = categoriesConfig
+const categories = categoriesConfig as unknown as Ref<CategoryConfig[]>
 const selectedId = ref<string | null>(categories.value[0]?.id ?? null)
 
 const selected = computed({
   get() {
-    return categories.value.find((c) => c.id === selectedId.value) ?? null
+    return categories.value.find((c: CategoryConfig) => c.id === selectedId.value) ?? null
   },
   set(value) {
     if (!value) return
-    const idx = categories.value.findIndex((c) => c.id === value.id)
+    const idx = categories.value.findIndex((c: CategoryConfig) => c.id === value.id)
     if (idx !== -1) {
       categories.value[idx] = { ...value }
       // 触发响应式更新
@@ -49,7 +49,7 @@ const onSelect = (id: string) => {
 
 const onAdd = () => {
   const nextOrder =
-    categories.value.reduce((max, c) => Math.max(max, c.order), 0) + 1
+    categories.value.reduce((max: number, c: CategoryConfig) => Math.max(max, c.order), 0) + 1
   const newId = `category_${Date.now()}`
   const newCategory: CategoryConfig = {
     id: newId,
@@ -76,7 +76,8 @@ const isAddingSub = ref(false)
 const onAddSub = () => {
   if (!selected.value) return
   const subCategories = selected.value.subCategories || []
-  const nextOrder = subCategories.reduce((max, s) => Math.max(max, s.order), 0) + 1
+  const nextOrder =
+    subCategories.reduce((max: number, s: SubCategoryConfig) => Math.max(max, s.order), 0) + 1
   const newSub: SubCategoryConfig = {
     id: `sub_${Date.now()}`,
     name: '新子分类',
@@ -89,9 +90,12 @@ const onAddSub = () => {
   }
   selected.value.subCategories.push(newSub)
   // 触发响应式更新
-  const categoryIndex = categories.value.findIndex(c => c.id === selected.value?.id)
+  const categoryIndex = categories.value.findIndex((c: CategoryConfig) => c.id === selected.value?.id)
   if (categoryIndex >= 0) {
-    categories.value[categoryIndex] = { ...categories.value[categoryIndex] }
+    const current = categories.value[categoryIndex]
+    if (current) {
+      categories.value[categoryIndex] = { ...current }
+    }
     categories.value = [...categories.value]
   }
   editingSub.value = newSub
@@ -106,16 +110,19 @@ const onEditSub = (sub: SubCategoryConfig) => {
 const onSaveSub = () => {
   if (!selected.value || !editingSub.value) return
   const subCategories = selected.value.subCategories || []
-  const idx = subCategories.findIndex((s) => s.id === editingSub.value!.id)
+  const idx = subCategories.findIndex((s: SubCategoryConfig) => s.id === editingSub.value!.id)
   if (idx !== -1) {
     subCategories[idx] = { ...editingSub.value }
   } else {
     subCategories.push({ ...editingSub.value })
   }
   // 触发响应式更新
-  const categoryIndex = categories.value.findIndex(c => c.id === selected.value?.id)
+  const categoryIndex = categories.value.findIndex((c: CategoryConfig) => c.id === selected.value?.id)
   if (categoryIndex >= 0) {
-    categories.value[categoryIndex] = { ...categories.value[categoryIndex] }
+    const current = categories.value[categoryIndex]
+    if (current) {
+      categories.value[categoryIndex] = { ...current }
+    }
     categories.value = [...categories.value]
   }
   editingSub.value = null
@@ -126,13 +133,16 @@ const onDeleteSub = (subId: string) => {
   if (!selected.value) return
   if (!confirm('确定删除此子分类？')) return
   const subCategories = selected.value.subCategories || []
-  const idx = subCategories.findIndex((s) => s.id === subId)
+  const idx = subCategories.findIndex((s: SubCategoryConfig) => s.id === subId)
   if (idx !== -1) {
     subCategories.splice(idx, 1)
     // 触发响应式更新
-    const categoryIndex = categories.value.findIndex(c => c.id === selected.value?.id)
+    const categoryIndex = categories.value.findIndex((c: CategoryConfig) => c.id === selected.value?.id)
     if (categoryIndex >= 0) {
-      categories.value[categoryIndex] = { ...categories.value[categoryIndex] }
+      const current = categories.value[categoryIndex]
+      if (current) {
+        categories.value[categoryIndex] = { ...current }
+      }
       categories.value = [...categories.value]
     }
   }
@@ -150,7 +160,7 @@ const onCancelSub = () => {
 // 删除分类
 const onDeleteCategory = (categoryId: string) => {
   if (!confirm('确定删除此分类？删除后无法恢复。')) return
-  const idx = categories.value.findIndex((c) => c.id === categoryId)
+  const idx = categories.value.findIndex((c: CategoryConfig) => c.id === categoryId)
   if (idx !== -1) {
     categories.value.splice(idx, 1)
     // 触发响应式更新
@@ -168,9 +178,12 @@ watch(
   (newVal) => {
     if (newVal) {
       // 当 selected 变化时，触发响应式更新
-      const categoryIndex = categories.value.findIndex(c => c.id === newVal.id)
+      const categoryIndex = categories.value.findIndex((c: CategoryConfig) => c.id === newVal.id)
       if (categoryIndex >= 0) {
-        categories.value[categoryIndex] = { ...categories.value[categoryIndex] }
+        const current = categories.value[categoryIndex]
+        if (current) {
+          categories.value[categoryIndex] = { ...current }
+        }
         categories.value = [...categories.value]
         // 同步配置到分类数据
         syncCategoryConfigToData(newVal.id)
