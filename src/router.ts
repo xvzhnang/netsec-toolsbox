@@ -1,15 +1,12 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
-import DashboardView from './views/DashboardView.vue'
-import SettingsView from './views/SettingsView.vue'
-import CategoryView from './views/CategoryView.vue'
-import WikiView from './views/WikiView.vue'
 
+// 关键优化：所有视图使用懒加载，减小首屏体积
 const routes: RouteRecordRaw[] = [
   {
     path: '/',
     name: 'dashboard',
-    component: DashboardView,
+    component: () => import('./views/DashboardView.vue'),
     meta: {
       transition: 'fade',
     },
@@ -17,7 +14,7 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/category/:id',
     name: 'category',
-    component: CategoryView,
+    component: () => import('./views/CategoryView.vue'),
     meta: {
       transition: 'slide',
     },
@@ -25,7 +22,7 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/settings',
     name: 'settings',
-    component: SettingsView,
+    component: () => import('./views/SettingsView.vue'),
     meta: {
       transition: 'fade',
     },
@@ -33,7 +30,7 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/wiki',
     name: 'wiki',
-    component: WikiView,
+    component: () => import('./views/WikiView.vue'),
     meta: {
       transition: 'fade',
     },

@@ -176,7 +176,32 @@ class AIRequestHandler(BaseHTTPRequestHandler):
         # 减少日志输出（只在错误时输出）
         try:
             parsed_path = urlparse(self.path)
-            
+
+            if parsed_path.path == '/shutdown':
+                try:
+                    self._send_json_response({"status": "shutting_down"})
+                except Exception:
+                    try:
+                        self._send_error(200, "OK")
+                    except Exception:
+                        pass
+
+                _mark_normal_exit()
+
+                import threading
+
+                def _shutdown_and_exit():
+                    try:
+                        try:
+                            self.server.shutdown()
+                        except Exception:
+                            pass
+                    finally:
+                        os._exit(0)
+
+                threading.Thread(target=_shutdown_and_exit, daemon=True).start()
+                return
+
             if parsed_path.path == '/v1/chat/completions':
                 self._handle_chat_completions(request_id)
             else:
@@ -775,4 +800,3 @@ class AIRequestHandler(BaseHTTPRequestHandler):
         """重写日志方法，避免输出到 stderr"""
         # 可以在这里添加自定义日志逻辑
         pass
-

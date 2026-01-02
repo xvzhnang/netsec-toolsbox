@@ -1,14 +1,16 @@
 use anyhow::Result;
-use log::{error, info};
-/// GatewayPool 的 Service trait 实现包装器
-use std::sync::{Arc, Mutex};
+use log::{error, info, warn};
+use parking_lot::Mutex;
+use std::sync::Arc;
+use std::thread;
+use std::time::{Duration, Instant};
 
 use crate::ai_service::get_global_pool;
 use crate::ai_service::pool::GatewayPool;
 use crate::service::state::ServiceState;
 use crate::service::trait_def::{HealthStatus, Service};
 
-/// GatewayPool 的 Service 包装器
+/// GatewayPool 的 Service trait 实现包装器
 pub struct GatewayPoolService {
     id: String,
     name: String,
@@ -62,76 +64,105 @@ impl Service for GatewayPoolService {
     fn start(&mut self) -> Result<()> {
         info!("[GatewayPoolService] 启动服务: {}", self.id);
 
-        // 检查是否已经启动
-        if self.state == ServiceState::Idle || self.state == ServiceState::Busy {
-            info!("[GatewayPoolService] 服务已在运行，跳过重复启动");
-            return Ok(());
-        }
-
-        // 检查是否已初始化（一次性初始化保护）
-        let is_initialized = {
-            let initialized = crate::utils::lock_or_recover(
-                self.initialized.as_ref(),
-                "GatewayPoolService.initialized",
+        let already_available = matches!(
+            self.state,
+            ServiceState::Idle | ServiceState::Busy | ServiceState::Degraded | ServiceState::Warmup
+        );
+        if already_available {
+            info!(
+                "[GatewayPoolService] 服务 {} 已在运行（状态 {:?}），跳过重复启动（幂等性保护）",
+                self.id, self.state
             );
-            *initialized
-        };
-
-        if is_initialized {
-            info!("[GatewayPoolService] 服务已初始化，跳过重复启动");
             return Ok(());
         }
 
-        let result = {
+        if matches!(
+            self.state,
+            ServiceState::Starting
+                | ServiceState::Failed
+                | ServiceState::Stopped
+                | ServiceState::Restarting
+                | ServiceState::Stopping
+        ) {
+            let is_initialized = {
+                let initialized = crate::utils::lock_or_recover(
+                    self.initialized.as_ref(),
+                    "GatewayPoolService.initialized",
+                );
+                *initialized
+            };
+
+            let pool_failed = {
+                let pool_guard =
+                    crate::utils::lock_or_recover(self.pool.as_ref(), "GatewayPoolService.pool");
+                pool_guard.is_startup_failed()
+            };
+
+            if is_initialized && !pool_failed {
+                info!("[GatewayPoolService] 服务已初始化，跳过重复启动");
+                return Ok(());
+            }
+        }
+
+        {
+            let pool_guard =
+                crate::utils::lock_or_recover(self.pool.as_ref(), "GatewayPoolService.pool");
+            pool_guard.clear_startup_failed();
+        }
+
+        let needs_start = {
             let pool_guard =
                 crate::utils::lock_or_recover(self.pool.as_ref(), "GatewayPoolService.pool");
             let workers = pool_guard.get_workers();
 
-            // 检查所有 Worker 是否已启动
-            let mut all_started = true;
+            let mut any_started = false;
             for worker in workers {
                 let wg = crate::utils::lock_or_recover(worker.as_ref(), "GatewayWorker");
-                if wg.process.is_none()
-                    && !matches!(
-                        wg.status(),
-                        crate::ai_service::pool::WorkerState::FailedPermanent
-                            | crate::ai_service::pool::WorkerState::Disabled
-                    )
-                {
-                    all_started = false;
+                if wg.process.is_some() {
+                    any_started = true;
                     break;
                 }
             }
-
-            if all_started {
-                info!("[GatewayPoolService] 所有 Worker 已启动，跳过重复启动");
-                Ok(vec!["Workers already started".to_string()])
-            } else {
-                // 启动所有 Worker（只启动一次）
-                let result = pool_guard.start_all();
-                if result.is_ok() {
-                    info!("[GatewayPoolService] 连接池初始化成功");
-
-                    // 启动健康检查线程（只启动一次）
-                    pool_guard.start_health_check_thread();
-                }
-                result
-            }
+            drop(pool_guard); // 关键优化：立即释放锁，避免阻塞
+            !any_started
         };
 
-        match result {
-            Ok(_) => {
+        if needs_start {
+            let result = {
+                let pool_guard =
+                    crate::utils::lock_or_recover(self.pool.as_ref(), "GatewayPoolService.pool");
+                let result = pool_guard.start_all();
+                if result.is_ok() {
+                    info!("[GatewayPoolService] 连接池初始化已触发（后台启动中）");
+                    pool_guard.start_health_check_thread();
+                }
+                drop(pool_guard);
+                result
+            };
+
+            if let Err(e) = result {
+                error!("[GatewayPoolService] 启动失败: {}", e);
+                self.set_state_unchecked(ServiceState::Failed);
                 *crate::utils::lock_or_recover(
                     self.initialized.as_ref(),
                     "GatewayPoolService.initialized",
-                ) = true;
-                Ok(())
+                ) = false;
+                anyhow::bail!("启动失败: {}", e);
             }
-            Err(e) => {
-                error!("[GatewayPoolService] 启动失败: {}", e);
-                anyhow::bail!("启动失败: {}", e)
-            }
+        } else {
+            let pool_guard =
+                crate::utils::lock_or_recover(self.pool.as_ref(), "GatewayPoolService.pool");
+            pool_guard.start_health_check_thread();
         }
+
+        // 关键优化：非阻塞启动，立即返回
+        // 标记为已初始化，具体的 Worker 就绪状态由健康检查线程在后台更新
+        *crate::utils::lock_or_recover(
+            self.initialized.as_ref(),
+            "GatewayPoolService.initialized",
+        ) = true;
+
+        Ok(())
     }
 
     fn stop(&mut self) -> Result<()> {
@@ -140,6 +171,7 @@ impl Service for GatewayPoolService {
         let result = {
             let pool_guard =
                 crate::utils::lock_or_recover(self.pool.as_ref(), "GatewayPoolService.pool");
+            pool_guard.clear_startup_failed();
             pool_guard.stop_all().map(|_| ())
         };
 
@@ -182,6 +214,15 @@ impl Service for GatewayPoolService {
     }
 
     fn message(&self) -> Option<String> {
+        if self.state == ServiceState::Failed {
+            let pool_guard =
+                crate::utils::lock_or_recover(self.pool.as_ref(), "GatewayPoolService.pool");
+            if let Some(reason) = pool_guard.startup_failed_reason() {
+                return Some(format!("启动失败: {}", reason));
+            }
+            return Some("启动失败".to_string());
+        }
+
         let pool_guard =
             crate::utils::lock_or_recover(self.pool.as_ref(), "GatewayPoolService.pool");
         let workers = pool_guard.get_workers();
@@ -208,7 +249,8 @@ impl Service for GatewayPoolService {
                 crate::ai_service::pool::WorkerState::Unhealthy
                 | crate::ai_service::pool::WorkerState::Dead
                 | crate::ai_service::pool::WorkerState::FailedPermanent
-                | crate::ai_service::pool::WorkerState::Disabled => unhealthy_count += 1,
+                | crate::ai_service::pool::WorkerState::Disabled
+                | crate::ai_service::pool::WorkerState::Zombie => unhealthy_count += 1,
                 _ => {}
             }
         }

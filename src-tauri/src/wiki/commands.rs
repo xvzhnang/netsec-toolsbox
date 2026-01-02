@@ -82,15 +82,13 @@ pub fn get_wiki_themes() -> Result<Vec<String>, String> {
 
     let mut themes = Vec::new();
     if let Ok(entries) = std::fs::read_dir(&theme_dir) {
-        for entry in entries {
-            if let Ok(entry) = entry {
-                let path = entry.path();
-                if path.is_file() {
-                    if let Some(ext) = path.extension() {
-                        if ext == "css" {
-                            if let Some(name) = path.file_stem().and_then(|n| n.to_str()) {
-                                themes.push(name.to_string());
-                            }
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() {
+                if let Some(ext) = path.extension() {
+                    if ext == "css" {
+                        if let Some(name) = path.file_stem().and_then(|n| n.to_str()) {
+                            themes.push(name.to_string());
                         }
                     }
                 }

@@ -46,7 +46,7 @@ fn launch_in_terminal_windows(working_dir: &Path, command: &str) -> Result<(), S
     );
 
     Command::new("powershell")
-        .args(&["-Command", &ps_command])
+        .args(["-Command", &ps_command])
         .spawn()
         .map_err(|e| format!("启动终端失败: {}", e))?;
 
@@ -229,7 +229,7 @@ fn launch_jar_tool(jar_config: &JarConfig) -> Result<(), String> {
     };
 
     // 构建 Java 命令
-    let mut command = format!("{}", java_cmd);
+    let mut command = java_cmd.to_string();
 
     // 添加 JVM 参数
     if let Some(ref jvm_args) = jar_config.jvm_args {
@@ -277,7 +277,7 @@ fn launch_lnk_tool(exec_path: &str) -> Result<(), String> {
     // Windows 上使用 start 命令打开快捷方式
     // start 命令会自动处理快捷方式并启动目标程序
     Command::new("cmd")
-        .args(&["/C", "start", "", exec_path])
+        .args(["/C", "start", "", exec_path])
         .spawn()
         .map_err(|e| format!("启动快捷方式失败: {}", e))?;
 
@@ -302,7 +302,7 @@ pub fn open_url_in_browser(url: String) -> Result<(), String> {
     {
         // Windows: 使用 start 命令打开默认浏览器
         Command::new("cmd")
-            .args(&["/C", "start", "", url.as_str()])
+            .args(["/C", "start", "", url.as_str()])
             .spawn()
             .map_err(|e| format!("打开浏览器失败: {}", e))?;
     }
@@ -363,7 +363,7 @@ fn launch_html_tool(exec_path: &str) -> Result<(), String> {
     {
         // Windows: 使用 start 命令打开默认浏览器
         Command::new("cmd")
-            .args(&["/C", "start", "", &file_url])
+            .args(["/C", "start", "", &file_url])
             .spawn()
             .map_err(|e| format!("打开浏览器失败: {}", e))?;
     }

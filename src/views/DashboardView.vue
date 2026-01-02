@@ -1,7 +1,6 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, defineAsyncComponent, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import AiAssistantPanel from '../components/AiAssistantPanel.vue'
 import ContextMenu, { type MenuItem } from '../components/ContextMenu.vue'
 import ModalDialog from '../components/ModalDialog.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
@@ -32,9 +31,40 @@ const router = useRouter()
 
 const categoriesRef = categoriesConfig
 
+const AiAssistantPanel = defineAsyncComponent(() => import('../components/AiAssistantPanel.vue'))
+
 const query = ref('')
-// AI功能默认不开启，由用户自主开启
-const isAiOpen = ref(false)
+
+// AI 状态持久化的 key
+const AI_OPEN_STATE_KEY = 'netsec-toolbox_ai_open_state'
+
+// 关键优化：AI功能默认关闭，实现真正的懒加载（只有用户点击时才加载组件）
+// 从 localStorage 读取保存的状态
+const loadAiOpenState = (): boolean => {
+  try {
+    const saved = localStorage.getItem(AI_OPEN_STATE_KEY)
+    return saved === 'true'
+  } catch (error) {
+    console.warn('Failed to load AI open state:', error)
+    return false
+  }
+}
+
+// 保存 AI 状态到 localStorage
+const saveAiOpenState = (state: boolean) => {
+  try {
+    localStorage.setItem(AI_OPEN_STATE_KEY, String(state))
+  } catch (error) {
+    console.warn('Failed to save AI open state:', error)
+  }
+}
+
+const isAiOpen = ref(loadAiOpenState())
+
+// 监听 isAiOpen 变化，自动保存状态
+watch(isAiOpen, (newValue) => {
+  saveAiOpenState(newValue)
+}, { immediate: false })
 // 搜索结果的选中索引（用于键盘导航）
 const selectedSearchIndex = ref(-1)
 
@@ -333,6 +363,9 @@ onMounted(() => {
   window.addEventListener('resize', handleResize)
   // 初始化位置
   handleResize()
+  
+  // 注意：AI 面板状态已经在组件初始化时从 localStorage 恢复
+  // 由于组件是懒加载的，每次路由切换都会重新创建，状态会自动恢复
 })
 
 onUnmounted(() => {

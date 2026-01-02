@@ -1,4 +1,5 @@
 import { createApp } from 'vue'
+import { createPinia } from 'pinia'
 import App from './App.vue'
 import { router } from './router'
 import './style.css'
@@ -7,6 +8,7 @@ import './style.css'
 // 这确保 Tauri API 有足够时间加载
 function initApp() {
   const app = createApp(App)
+  app.use(createPinia())
   app.use(router)
   app.mount('#app')
 }

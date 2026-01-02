@@ -6,33 +6,36 @@
         <span class="service-name">{{ service.name }}</span>
       </div>
       <div class="service-actions">
+        <!-- 关键优化：在 stopped 和 starting 状态下都显示启动按钮，避免按钮闪烁 -->
         <button
-          v-if="service.state === 'stopped'"
+          v-if="service.state === 'stopped' || service.state === 'starting'"
           type="button"
           class="action-btn start"
           @click="handleStart"
-          :disabled="actionInProgress"
-          title="启动服务"
+          :disabled="actionInProgress || service.state === 'starting'"
+          :title="service.state === 'starting' ? '服务启动中...' : '启动服务'"
         >
           ▶️
         </button>
+        <!-- 关键优化：在 idle、busy 和 stopping 状态下都显示停止按钮，避免按钮闪烁 -->
         <button
-          v-else-if="service.state === 'idle' || service.state === 'busy'"
+          v-else-if="service.state === 'idle' || service.state === 'busy' || service.state === 'stopping'"
           type="button"
           class="action-btn stop"
           @click="handleStop"
-          :disabled="actionInProgress"
-          title="停止服务"
+          :disabled="actionInProgress || service.state === 'stopping'"
+          :title="service.state === 'stopping' ? '服务停止中...' : '停止服务'"
         >
           ⏹️
         </button>
+        <!-- 关键优化：在 unhealthy 和 restarting 状态下都显示重启按钮，避免按钮闪烁 -->
         <button
-          v-else-if="service.state === 'unhealthy'"
+          v-else-if="service.state === 'unhealthy' || service.state === 'restarting'"
           type="button"
           class="action-btn restart"
           @click="handleRestart"
-          :disabled="actionInProgress"
-          title="重启服务"
+          :disabled="actionInProgress || service.state === 'restarting'"
+          :title="service.state === 'restarting' ? '服务重启中...' : '重启服务'"
         >
           🔄
         </button>
