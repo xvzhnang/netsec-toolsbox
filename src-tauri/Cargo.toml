@@ -40,3 +40,8 @@ tokio = { version = "1.35", features = ["rt", "rt-multi-thread", "sync", "time"]
 rusqlite = { version = "0.32", features = ["bundled"] }
 parking_lot = "0.12"
 crossbeam-channel = "0.5"
+actix-web = "4.12.1"
+actix-files = "0.6.9"
+actix-cors = "0.7.1"
+tauri-plugin-shell = "2.3.3"
+tauri-plugin-dialog = "2.4.2"

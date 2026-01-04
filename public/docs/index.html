@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Ne0XSec Toolbox Wiki</title>
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1" />
+  <meta name="description" content="Description">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0">
+  <!-- 使用本地 CSS -->
+  <link rel="stylesheet" href="vue.css">
+  <style>
+    /* 隐藏侧边栏和导航栏，仅显示内容 */
+    .sidebar {
+      display: none;
+    }
+    .content {
+      padding-top: 20px;
+      left: 0 !important;
+    }
+    body {
+      background-color: #f7f9fc;
+    }
+    .markdown-section {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 30px 40px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+      background-color: #fff;
+      border-radius: 8px;
+    }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <script>
+    window.$docsify = {
+      name: 'Ne0XSec Toolbox Wiki',
+      repo: '',
+      loadSidebar: false, // 关闭侧边栏
+      loadNavbar: false,  // 关闭导航栏
+      auto2top: true,     // 切换页面后自动跳转到顶部
+      homepage: 'README.md',
+      basePath: '/',
+    }
+  </script>
+  <!-- 使用本地 JS -->
+  <script src="docsify.min.js"></script>
+</body>
+</html>
