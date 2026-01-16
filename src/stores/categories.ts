@@ -1,5 +1,5 @@
 import { ref, watch } from 'vue'
-import { readConfigFile, writeConfigFile } from '../utils/fileStorage'
+import { readConfigFile, writeConfigFile, readConfigCacheSync } from '../utils/fileStorage'
 import { debug, error as logError, info } from '../utils/logger'
 
 /**
@@ -126,9 +126,7 @@ export interface CategoryPageData {
   subCategories: SubCategory[]
 }
 
-// 从JSON文件加载分类配置，如果没有则使用默认值
-const loadCategoriesConfig = async (): Promise<CategoryConfig[]> => {
-  const defaultConfig: CategoryConfig[] = [
+const DEFAULT_CATEGORIES_CONFIG: CategoryConfig[] = [
   {
     id: 'web',
     name: 'WEB',
@@ -209,102 +207,231 @@ const loadCategoriesConfig = async (): Promise<CategoryConfig[]> => {
     order: 8,
     enabled: true,
   },
-  ]
-  
+]
+
+const DEFAULT_CATEGORIES_DATA: CategoryPageData[] = [
+  {
+    id: 'web',
+    name: 'WEB',
+    label: 'Web 攻击与防御',
+    description: '面向 Web 场景的信息收集、扫描与利用工具集合。',
+    subCategories: [
+      {
+        id: 'web-info',
+        name: '信息收集',
+        description: '基础资产信息、指纹识别、子域名枚举。',
+        tools: [
+          {
+            id: 'host-info',
+            name: '主机信息探测',
+            description: '对域名/IP 进行 whois、地理位置、ASN 等查询。',
+            iconEmoji: '🌐',
+            execPath: 'C:\\\\Tools\\\\whois.exe',
+          },
+          {
+            id: 'subdomain',
+            name: '子域名收集器',
+            description: '综合被动源与爆破，对目标域名进行子域枚举。',
+            iconEmoji: '🧭',
+            execPath: 'C:\\\\Tools\\\\subfinder.exe',
+            args: ['-d', 'example.com'],
+          },
+          {
+            id: 'fingerprint',
+            name: '网站指纹识别',
+            description: '识别 Web 服务器、中间件、CMS 与常见 WAF。',
+            iconEmoji: '🔍',
+            execPath: 'C:\\\\Tools\\\\fingerprint.exe',
+          },
+        ],
+      },
+      {
+        id: 'web-dir',
+        name: '目录与文件扫描',
+        description: '敏感目录/文件爆破、备份文件探测。',
+        tools: [
+          {
+            id: 'dirscan',
+            name: '目录扫描',
+            description: '基于字典的目录/文件暴破，可设置线程与状态过滤。',
+            iconEmoji: '📂',
+            execPath: 'C:\\\\Tools\\\\dirscan.exe',
+          },
+          {
+            id: 'backup-scan',
+            name: '备份文件探测',
+            description: '常见备份与历史文件名探测，支持自定义规则。',
+            iconEmoji: '🗂️',
+            execPath: 'C:\\\\Tools\\\\backupscan.exe',
+          },
+        ],
+      },
+      {
+        id: 'web-port',
+        name: '端口与服务探测',
+        description: 'Web 相关端口扫描与服务识别。',
+        tools: [
+          {
+            id: 'web-nmap',
+            name: 'Web 端口扫描',
+            description: '快速扫描常见 Web 端口并识别服务。',
+            iconEmoji: '📡',
+            execPath: 'C:\\\\Tools\\\\nmap.exe',
+            args: ['-Pn', '-sV'],
+            wikiUrl: 'tools/nmap',
+          },
+        ],
+      },
+      {
+        id: 'web-vuln',
+        name: '漏洞探测与利用',
+        description: '常见 Web 漏洞扫描与 POC/EXP 执行。',
+        tools: [
+          {
+            id: 'poc-runner',
+            name: 'POC 运行器',
+            description: '管理与运行多种 Web POC，统一输出结果。',
+            iconEmoji: '⚡',
+            execPath: 'C:\\\\Tools\\\\pocrunner.exe',
+          },
+        ],
+      },
+    ],
+  },
+]
+
+// 解析分类配置内容
+function parseCategoriesConfigContent(fileContent: string): CategoryConfig[] | null {
+  try {
+    if (!fileContent || fileContent === '{}') return null
+    const parsed = JSON.parse(fileContent)
+    
+    // 如果文件是数组格式（新格式），直接使用
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      lastSavedCategoriesContent = JSON.stringify(parsed, null, 2)
+      return parsed.map((cat: unknown) => {
+        const c = cat as Record<string, unknown>
+        return {
+          id: String(c.id || ''),
+          name: String(c.name || ''),
+          label: c.label ? String(c.label) : undefined,
+          description: c.description ? String(c.description) : undefined,
+          icon: String(c.icon || 'apps'),
+          color: String(c.color || '#4DA3FF'),
+          order: typeof c.order === 'number' ? c.order : Number(c.order) || 0,
+          enabled: typeof c.enabled === 'boolean' ? c.enabled : c.enabled !== false,
+        }
+      })
+    }
+    // 兼容旧格式：如果文件包含 categories 字段
+    const config = parsed.categories
+    if (Array.isArray(config) && config.length > 0) {
+      lastSavedCategoriesContent = JSON.stringify(config.map((cat: unknown) => {
+        const c = cat as Record<string, unknown>
+        return {
+          id: String(c.id || ''),
+          name: String(c.name || ''),
+          label: c.label ? String(c.label) : undefined,
+          description: c.description ? String(c.description) : undefined,
+          icon: String(c.icon || 'apps'),
+          color: String(c.color || '#4DA3FF'),
+          order: typeof c.order === 'number' ? c.order : Number(c.order) || 0,
+          enabled: typeof c.enabled === 'boolean' ? c.enabled : c.enabled !== false,
+        }
+      }), null, 2)
+      return config.map((cat: unknown) => {
+        const c = cat as Record<string, unknown>
+        return {
+          id: String(c.id || ''),
+          name: String(c.name || ''),
+          label: c.label ? String(c.label) : undefined,
+          description: c.description ? String(c.description) : undefined,
+          icon: String(c.icon || 'apps'),
+          color: String(c.color || '#4DA3FF'),
+          order: typeof c.order === 'number' ? c.order : Number(c.order) || 0,
+          enabled: typeof c.enabled === 'boolean' ? c.enabled : c.enabled !== false,
+        }
+      })
+    }
+    // 兼容旧格式：如果整个文件就是数组（但没走上面的 Array.isArray？）
+    // 上面的 Array.isArray 已经覆盖了
+    
+    return null
+  } catch (error) {
+    logError('Failed to parse categories config:', error)
+    return null
+  }
+}
+
+// 解析工具数据内容
+function parseCategoriesDataContent(fileContent: string): CategoryPageData[] | null {
+  try {
+    if (!fileContent || !fileContent.trim() || fileContent === '{}' || fileContent === '[]') return null
+    const parsed = JSON.parse(fileContent)
+    
+    // 如果文件是数组格式（新格式），直接使用
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      lastSavedToolsContent = JSON.stringify(parsed, null, 2)
+      return parsed.map((cat: unknown) => {
+        return transformCategoryPageData(cat as Record<string, unknown>)
+      })
+    }
+    // 兼容旧格式：如果文件包含 data 字段
+    const data = parsed.data
+    if (Array.isArray(data) && data.length > 0) {
+      lastSavedToolsContent = JSON.stringify(data.map((cat: unknown) => cat as Record<string, unknown>), null, 2)
+      return data.map((cat: unknown) => {
+        return transformCategoryPageData(cat as Record<string, unknown>)
+      })
+    }
+    return null
+  } catch (error) {
+    logError('Failed to parse categories data:', error)
+    return null
+  }
+}
+
+// 从JSON文件加载分类配置，如果没有则使用默认值
+const loadCategoriesConfig = async (): Promise<CategoryConfig[]> => {
   try {
     const fileContent = await readConfigFile('categories.json')
-    if (fileContent && fileContent !== '{}') {
-      const parsed = JSON.parse(fileContent)
-      // 如果文件是数组格式（新格式），直接使用
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        lastSavedCategoriesContent = JSON.stringify(parsed, null, 2)
-        return parsed.map((cat: unknown) => {
-          const c = cat as Record<string, unknown>
-          return {
-            id: String(c.id || ''),
-            name: String(c.name || ''),
-            label: c.label ? String(c.label) : undefined,
-            description: c.description ? String(c.description) : undefined,
-            icon: String(c.icon || 'apps'),
-            color: String(c.color || '#4DA3FF'),
-            order: typeof c.order === 'number' ? c.order : Number(c.order) || 0,
-            enabled: typeof c.enabled === 'boolean' ? c.enabled : c.enabled !== false,
-          }
-        })
-      }
-      // 兼容旧格式：如果文件包含 categories 字段
-      const config = parsed.categories
-      if (Array.isArray(config) && config.length > 0) {
-        lastSavedCategoriesContent = JSON.stringify(config.map((cat: unknown) => {
-          const c = cat as Record<string, unknown>
-          return {
-            id: String(c.id || ''),
-            name: String(c.name || ''),
-            label: c.label ? String(c.label) : undefined,
-            description: c.description ? String(c.description) : undefined,
-            icon: String(c.icon || 'apps'),
-            color: String(c.color || '#4DA3FF'),
-            order: typeof c.order === 'number' ? c.order : Number(c.order) || 0,
-            enabled: typeof c.enabled === 'boolean' ? c.enabled : c.enabled !== false,
-          }
-        }), null, 2)
-        // 验证配置格式，确保所有必需字段都存在
-        return config.map((cat: unknown) => {
-          const c = cat as Record<string, unknown>
-          return {
-            id: String(c.id || ''),
-            name: String(c.name || ''),
-            label: c.label ? String(c.label) : undefined,
-            description: c.description ? String(c.description) : undefined,
-            icon: String(c.icon || 'apps'),
-            color: String(c.color || '#4DA3FF'),
-            order: typeof c.order === 'number' ? c.order : Number(c.order) || 0,
-            enabled: typeof c.enabled === 'boolean' ? c.enabled : c.enabled !== false,
-          }
-        })
-      }
-      // 兼容旧格式：如果整个文件就是数组
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        lastSavedCategoriesContent = JSON.stringify(parsed.map((cat: unknown) => {
-          const c = cat as Record<string, unknown>
-          return {
-            id: String(c.id || ''),
-            name: String(c.name || ''),
-            label: c.label ? String(c.label) : undefined,
-            description: c.description ? String(c.description) : undefined,
-            icon: String(c.icon || 'apps'),
-            color: String(c.color || '#4DA3FF'),
-            order: typeof c.order === 'number' ? c.order : Number(c.order) || 0,
-            enabled: typeof c.enabled === 'boolean' ? c.enabled : c.enabled !== false,
-          }
-        }), null, 2)
-        return parsed.map((cat: unknown) => {
-          const c = cat as Record<string, unknown>
-          return {
-            id: String(c.id || ''),
-            name: String(c.name || ''),
-            label: c.label ? String(c.label) : undefined,
-            description: c.description ? String(c.description) : undefined,
-            icon: String(c.icon || 'apps'),
-            color: String(c.color || '#4DA3FF'),
-            order: typeof c.order === 'number' ? c.order : Number(c.order) || 0,
-            enabled: typeof c.enabled === 'boolean' ? c.enabled : c.enabled !== false,
-          }
-        })
-      }
-    }
+    const parsed = parseCategoriesConfigContent(fileContent)
+    if (parsed) return parsed
   } catch (error) {
     logError('Failed to load categories config from file:', error)
   }
-  
-  // 如果文件不存在或解析失败，返回默认配置
-  return defaultConfig
+  return DEFAULT_CATEGORIES_CONFIG
 }
 
-// 首页分类配置（用于Dashboard）
-export const categoriesConfig = ref<CategoryConfig[]>([])
+// 尝试从缓存同步加载初始化数据
+const initialConfig = (() => {
+  const cached = readConfigCacheSync('categories.json')
+  if (cached) {
+    const parsed = parseCategoriesConfigContent(cached)
+    if (parsed) {
+      info('⚡ 从缓存加载了分类配置 (Sync)')
+      return parsed
+    }
+  }
+  return DEFAULT_CATEGORIES_CONFIG // 如果缓存没有，直接使用默认配置渲染首屏
+})()
 
-let lastSavedCategoriesContent: string | null = null
+const initialData = (() => {
+  const cached = readConfigCacheSync('tools.json')
+  if (cached) {
+    const parsed = parseCategoriesDataContent(cached)
+    if (parsed) {
+      info('⚡ 从缓存加载了工具数据 (Sync)')
+      return parsed
+    }
+  }
+  return DEFAULT_CATEGORIES_DATA
+})()
+
+// 首页分类配置（用于Dashboard）
+export const categoriesConfig = ref<CategoryConfig[]>(initialConfig)
+
+var lastSavedCategoriesContent: string | null = null
 let categoriesSaveTimer: ReturnType<typeof setTimeout> | null = null
 let categoriesSavePending = false
 let categoriesSaveRunner: Promise<void> | null = null
@@ -387,7 +514,7 @@ export async function flushSaveCategoriesConfig(): Promise<void> {
   }
 }
 
-let lastSavedToolsContent: string | null = null
+var lastSavedToolsContent: string | null = null
 let toolsSaveTimer: ReturnType<typeof setTimeout> | null = null
 let toolsSavePending = false
 let toolsSaveRunner: Promise<void> | null = null
@@ -525,128 +652,19 @@ watch(
 
 // 从JSON文件加载分类页面数据，如果没有则使用默认值
 const loadCategoriesData = async (): Promise<CategoryPageData[]> => {
-  const defaultData: CategoryPageData[] = [
-  {
-    id: 'web',
-    name: 'WEB',
-    label: 'Web 攻击与防御',
-    description: '面向 Web 场景的信息收集、扫描与利用工具集合。',
-    subCategories: [
-      {
-        id: 'web-info',
-        name: '信息收集',
-        description: '基础资产信息、指纹识别、子域名枚举。',
-        tools: [
-          {
-            id: 'host-info',
-            name: '主机信息探测',
-            description: '对域名/IP 进行 whois、地理位置、ASN 等查询。',
-            iconEmoji: '🌐',
-            execPath: 'C:\\\\Tools\\\\whois.exe',
-          },
-          {
-            id: 'subdomain',
-            name: '子域名收集器',
-            description: '综合被动源与爆破，对目标域名进行子域枚举。',
-            iconEmoji: '🧭',
-            execPath: 'C:\\\\Tools\\\\subfinder.exe',
-            args: ['-d', 'example.com'],
-          },
-          {
-            id: 'fingerprint',
-            name: '网站指纹识别',
-            description: '识别 Web 服务器、中间件、CMS 与常见 WAF。',
-            iconEmoji: '🔍',
-            execPath: 'C:\\\\Tools\\\\fingerprint.exe',
-          },
-        ],
-      },
-      {
-        id: 'web-dir',
-        name: '目录与文件扫描',
-        description: '敏感目录/文件爆破、备份文件探测。',
-        tools: [
-          {
-            id: 'dirscan',
-            name: '目录扫描',
-            description: '基于字典的目录/文件暴破，可设置线程与状态过滤。',
-            iconEmoji: '📂',
-            execPath: 'C:\\\\Tools\\\\dirscan.exe',
-          },
-          {
-            id: 'backup-scan',
-            name: '备份文件探测',
-            description: '常见备份与历史文件名探测，支持自定义规则。',
-            iconEmoji: '🗂️',
-            execPath: 'C:\\\\Tools\\\\backupscan.exe',
-          },
-        ],
-      },
-      {
-        id: 'web-port',
-        name: '端口与服务探测',
-        description: 'Web 相关端口扫描与服务识别。',
-        tools: [
-          {
-            id: 'web-nmap',
-            name: 'Web 端口扫描',
-            description: '快速扫描常见 Web 端口并识别服务。',
-            iconEmoji: '📡',
-            execPath: 'C:\\\\Tools\\\\nmap.exe',
-            args: ['-Pn', '-sV'],
-            wikiUrl: 'tools/nmap',
-          },
-        ],
-      },
-      {
-        id: 'web-vuln',
-        name: '漏洞探测与利用',
-        description: '常见 Web 漏洞扫描与 POC/EXP 执行。',
-        tools: [
-          {
-            id: 'poc-runner',
-            name: 'POC 运行器',
-            description: '管理与运行多种 Web POC，统一输出结果。',
-            iconEmoji: '⚡',
-            execPath: 'C:\\\\Tools\\\\pocrunner.exe',
-          },
-        ],
-      },
-    ],
-  },
-  ]
-  
   try {
     const fileContent = await readConfigFile('tools.json')
-    if (fileContent && fileContent.trim() && fileContent !== '{}' && fileContent !== '[]') {
-      const parsed = JSON.parse(fileContent)
-      // 如果文件是数组格式（新格式），直接使用
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        lastSavedToolsContent = JSON.stringify(parsed, null, 2)
-        // 转换数据格式
-        return parsed.map((cat: unknown) => {
-          return transformCategoryPageData(cat as Record<string, unknown>)
-        })
-      }
-      // 兼容旧格式：如果文件包含 data 字段
-      const data = parsed.data
-      if (Array.isArray(data) && data.length > 0) {
-        lastSavedToolsContent = JSON.stringify(data.map((cat: unknown) => cat as Record<string, unknown>), null, 2)
-        // 转换数据格式（如果是从旧格式）
-        return data.map((cat: unknown) => {
-          return transformCategoryPageData(cat as Record<string, unknown>)
-        })
-      }
-    }
+    const parsed = parseCategoriesDataContent(fileContent)
+    if (parsed) return parsed
   } catch (error) {
     logError('Failed to load categories data from file:', error)
   }
   
-  return defaultData
+  return DEFAULT_CATEGORIES_DATA
 }
 
 // 分类页面数据（用于CategoryView）
-export const categoriesData = ref<CategoryPageData[]>([])
+export const categoriesData = ref<CategoryPageData[]>(initialData)
 
 // 标志：数据是否已初始化完成（用于防止 watch 在初始化时触发保存）
 let isDataInitialized = false
@@ -733,4 +751,3 @@ export function syncCategoryConfigToData(categoryId: string) {
     })
   }
 }
-

@@ -87,8 +87,7 @@ fn is_port_open(addr: &str) -> bool {
     false
 }
 
-#[tauri::command]
-pub async fn start_mkdocs_server(state: State<'_, MkDocsServerState>) -> Result<u16, String> {
+pub fn init_mkdocs(state: &MkDocsServerState) -> Result<u16, String> {
     let base_dir = crate::utils::get_app_base_dir();
     let config_path = match find_mkdocs_config(&base_dir) {
         Some(p) => p,
@@ -161,6 +160,14 @@ pub async fn start_mkdocs_server(state: State<'_, MkDocsServerState>) -> Result<
             ))
         }
     }
+}
+
+#[tauri::command]
+pub async fn start_mkdocs_server(state: State<'_, MkDocsServerState>) -> Result<u16, String> {
+    // 异步命令中调用同步初始化逻辑
+    // 由于这可能涉及文件IO和进程启动，如果是长时间操作应该放在 spawn_blocking 中
+    // 但 mkdocs serve 启动通常很快，且 spawn 本身是非阻塞的
+    init_mkdocs(&state)
 }
 
 #[tauri::command]

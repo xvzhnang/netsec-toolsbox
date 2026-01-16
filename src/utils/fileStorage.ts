@@ -31,6 +31,13 @@ export async function readConfigFile(filename: string = 'categories.json'): Prom
  * @param content 文件内容
  */
 export async function writeConfigFile(filename: string, content: string): Promise<void> {
+  // 始终同步写入 localStorage 作为缓存，确保下次启动时能立即加载
+  try {
+    localStorage.setItem(`netsec-toolbox_${filename}`, content)
+  } catch (e) {
+    warn('Failed to write cache to localStorage:', e)
+  }
+
   try {
     const invoker = getTauriInvoke()
     if (invoker) {
@@ -51,12 +58,24 @@ export async function writeConfigFile(filename: string, content: string): Promis
       return
     }
     // 降级到localStorage（开发环境或非Tauri环境）
-    warn('⚠️ Tauri API 不可用，降级到 localStorage')
-    localStorage.setItem(`netsec-toolbox_${filename}`, content)
+    warn('⚠️ Tauri API 不可用，已降级到 localStorage')
   } catch (error) {
     logError('❌ Failed to write config file:', error)
     // 降级到localStorage
     localStorage.setItem(`netsec-toolbox_${filename}`, content)
+  }
+}
+
+/**
+ * 同步读取配置缓存 (仅从 localStorage)
+ * 用于应用启动时快速渲染首屏
+ */
+export function readConfigCacheSync(filename: string): string | null {
+  try {
+    return localStorage.getItem(`netsec-toolbox_${filename}`)
+  } catch (e) {
+    warn('Failed to read cache from localStorage:', e)
+    return null
   }
 }
 

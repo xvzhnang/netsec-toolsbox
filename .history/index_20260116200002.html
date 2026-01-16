@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <style>
+      html, body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        background: #020617;
+      }
+      #boot-loader {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        z-index: 9999;
+        background: radial-gradient(circle at top, #0f172a 0%, #020617 100%);
+      }
+      .boot-logo {
+        font-size: 64px;
+        margin-bottom: 24px;
+        animation: bootPulse 2s infinite;
+      }
+      .boot-bar-bg {
+        width: 180px;
+        height: 4px;
+        background: rgba(148, 163, 184, 0.2);
+        border-radius: 2px;
+        overflow: hidden;
+      }
+      .boot-bar {
+        width: 50%;
+        height: 100%;
+        background: #4da3ff;
+        animation: bootSlide 1.5s infinite ease-in-out;
+      }
+      @keyframes bootPulse {
+        0%, 100% { opacity: 1; transform: scale(1); }
+        50% { opacity: 0.8; transform: scale(0.95); }
+      }
+      @keyframes bootSlide {
+        0% { transform: translateX(-100%); }
+        100% { transform: translateX(200%); }
+      }
+    </style>
+    <title>netsec-toolbox</title>
+  </head>
+  <body>
+    <div id="boot-loader">
+      <div class="boot-logo">🛡️</div>
+      <div class="boot-bar-bg"><div class="boot-bar"></div></div>
+    </div>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

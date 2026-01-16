@@ -345,3 +345,21 @@ a:hover {
   background: rgba(77, 163, 255, 0.3);
   color: var(--text-primary);
 }
+
+/* Tailwind-like utility classes (Added for Module Status Indicators) */
+.animate-spin {
+  animation: spin 1s linear infinite;
+  display: inline-block;
+}
+
+.opacity-50 {
+  opacity: 0.5;
+}
+
+.cursor-wait {
+  cursor: wait;
+}
+
+.text-sm {
+  font-size: 0.875rem;
+}
