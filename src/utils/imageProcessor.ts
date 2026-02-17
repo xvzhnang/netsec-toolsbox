@@ -100,6 +100,23 @@ export function selectImageFile(): Promise<File | null> {
 import { getTauriInvoke } from './tauri'
 import { error as logError, warn } from './logger'
 
+function normalizePathOrUrl(input: string): string {
+  let s = String(input ?? '').trim()
+  if (!s) return ''
+  if ((s.startsWith('`') && s.endsWith('`')) || (s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) {
+    s = s.slice(1, -1).trim()
+  }
+  if (s.endsWith(':') && !/:\d+$/.test(s)) {
+    s = s.slice(0, -1).trim()
+  }
+  return s
+}
+
+function isHttpUrl(input: string): boolean {
+  const s = normalizePathOrUrl(input)
+  return s.startsWith('http://') || s.startsWith('https://')
+}
+
 /**
  * 从可执行文件路径提取图标
  * @param execPath 可执行文件路径
@@ -108,6 +125,8 @@ import { error as logError, warn } from './logger'
  */
 export async function extractIconFromExecutable(execPath: string, toolType?: string): Promise<string | null> {
   try {
+    const normalizedPath = normalizePathOrUrl(execPath)
+    if (!normalizedPath) return null
     const invoker = getTauriInvoke()
     if (!invoker) {
       warn('Tauri API 不可用，无法提取图标:', execPath)
@@ -116,7 +135,7 @@ export async function extractIconFromExecutable(execPath: string, toolType?: str
     
     const iconData = await invoker<string>('extract_icon_from_file', {
       params: {
-        filePath: execPath,
+        filePath: normalizedPath,
         toolType: toolType,
       }
     })
@@ -240,12 +259,17 @@ export function detectFileTypeFromPath(filePath: string): string {
  * @returns Promise<string | null> 图标数据URL或null
  */
 export async function autoFetchIcon(toolType: string | undefined, execPath: string): Promise<string | null> {
-  if (!execPath) {
+  const normalizedPath = normalizePathOrUrl(execPath)
+  if (!normalizedPath) {
     return null
   }
   
+  if (isHttpUrl(normalizedPath)) {
+    return await fetchFaviconFromUrl(normalizedPath)
+  }
+
   // 如果没有提供工具类型，根据文件路径自动判断
-  const detectedType = toolType || detectFileTypeFromPath(execPath)
+  const detectedType = toolType || detectFileTypeFromPath(normalizedPath)
   
   try {
     switch (detectedType) {
@@ -257,19 +281,19 @@ export async function autoFetchIcon(toolType: string | undefined, execPath: stri
       case '其他': {
         // 所有本地文件类型：尝试提取图标（后端会自动判断类型）
         // 不传递 toolType，让后端根据文件路径自动判断
-        return await extractIconFromExecutable(execPath, undefined)
+        return await extractIconFromExecutable(normalizedPath, undefined)
       }
       case 'HTML': {
         // HTML：提取 HTML 文件中的 favicon
-        return await extractIconFromExecutable(execPath, 'HTML')
+        return await extractIconFromExecutable(normalizedPath, 'HTML')
       }
       case '网页': {
         // URL：抓取网页 favicon
-        return await fetchFaviconFromUrl(execPath)
+        return await fetchFaviconFromUrl(normalizedPath)
       }
       default: {
         // 未知类型，尝试作为可执行文件提取
-        return await extractIconFromExecutable(execPath, undefined)
+        return await extractIconFromExecutable(normalizedPath, undefined)
       }
     }
   } catch (error) {

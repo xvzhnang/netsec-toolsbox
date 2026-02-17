@@ -30,9 +30,12 @@ export const useModuleStatusStore = defineStore('moduleStatus', () => {
       await fetchStatus()
     })
     
-    // 轮询作为兜底（每2秒检查一次，直到都就绪）
+    // 轮询作为兜底（避免永远轮询：Wiki 改为按需启动，不作为停止条件）
+    let tries = 0
+    const maxTries = 15
     const interval = setInterval(async () => {
-      if (aiReady.value && wikiReady.value) {
+      tries += 1
+      if (aiReady.value || tries >= maxTries) {
         clearInterval(interval)
         return
       }

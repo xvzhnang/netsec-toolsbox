@@ -674,12 +674,13 @@ Promise.all([
   loadCategoriesConfig(),
   loadCategoriesData(),
 ]).then(async ([config, data]) => {
+  // 标记数据已初始化完成（放在赋值前，确保后续任何写入/图标缓存都能被持久化）
+  // save* 内部有 lastSaved* 对比，不会因为初始化赋值而重复写入
+  isDataInitialized = true
+
   // 先设置值
   categoriesConfig.value = config
   categoriesData.value = data
-  
-  // 标记数据已初始化完成
-  isDataInitialized = true
   
   info('数据加载完成:', {
     categoriesCount: config.length,
