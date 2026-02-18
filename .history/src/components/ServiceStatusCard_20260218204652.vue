@@ -1,0 +1,336 @@
+<template>
+  <div class="service-card" :class="cardClass">
+    <div class="service-header">
+      <div class="service-title">
+        <span class="status-dot" :class="statusDotClass"></span>
+        <span class="service-name">{{ service.name }}</span>
+      </div>
+      <div class="service-actions">
+        <!-- 关键优化：在 stopped 和 starting 状态下都显示启动按钮，避免按钮闪烁 -->
+        <button
+          v-if="service.state === 'stopped' || service.state === 'starting'"
+          type="button"
+          class="action-btn start"
+          @click="handleStart"
+          :disabled="actionInProgress || service.state === 'starting'"
+          :title="service.state === 'starting' ? '服务启动中...' : '启动服务'"
+        >
+          ▶️
+        </button>
+        <!-- 关键优化：在 idle、busy 和 stopping 状态下都显示停止按钮，避免按钮闪烁 -->
+        <button
+          v-else-if="service.state === 'idle' || service.state === 'busy' || service.state === 'stopping'"
+          type="button"
+          class="action-btn stop"
+          @click="handleStop"
+          :disabled="actionInProgress || service.state === 'stopping'"
+          :title="service.state === 'stopping' ? '服务停止中...' : '停止服务'"
+        >
+          ⏹️
+        </button>
+        <!-- 关键优化：在 unhealthy 和 restarting 状态下都显示重启按钮，避免按钮闪烁 -->
+        <button
+          v-else-if="service.state === 'unhealthy' || service.state === 'restarting'"
+          type="button"
+          class="action-btn restart"
+          @click="handleRestart"
+          :disabled="actionInProgress || service.state === 'restarting'"
+          :title="service.state === 'restarting' ? '服务重启中...' : '重启服务'"
+        >
+          🔄
+        </button>
+      </div>
+    </div>
+    
+    <div class="service-body">
+      <div class="service-state">
+        <span class="state-label">状态:</span>
+        <span class="state-value" :class="stateValueClass">
+          {{ getStateText(service.state) }}
+        </span>
+      </div>
+      
+      <div v-if="service.message" class="service-message">
+        {{ service.message }}
+      </div>
+      
+      <div v-if="service.description" class="service-description">
+        {{ service.description }}
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { computed, ref, onMounted, onUnmounted } from 'vue'
+import { 
+  type ServiceStatusDTO, 
+  startService,
+  stopService,
+  restartService
+} from '../utils/serviceManager'
+import { onServiceStateChanged, onServiceError } from '../utils/serviceEvents'
+import { info, error as logError } from '../utils/logger'
+
+interface Props {
+  service: ServiceStatusDTO
+}
+
+const props = defineProps<Props>()
+const emit = defineEmits<{
+  updated: []
+}>()
+
+const actionInProgress = ref(false)
+
+const cardClass = computed(() => {
+  return {
+    'healthy': props.service.is_healthy && props.service.is_available,
+    'degraded': props.service.state === 'degraded',
+    'unhealthy': !props.service.is_healthy,
+    'stopped': props.service.state === 'stopped',
+  }
+})
+
+const statusDotClass = computed(() => {
+  return {
+    'active': props.service.is_available && props.service.is_healthy,
+    'degraded': props.service.state === 'degraded',
+    'error': !props.service.is_healthy,
+  }
+})
+
+const stateValueClass = computed(() => {
+  return {
+    'state-idle': props.service.state === 'idle',
+    'state-busy': props.service.state === 'busy',
+    'state-degraded': props.service.state === 'degraded',
+    'state-unhealthy': props.service.state === 'unhealthy',
+    'state-stopped': props.service.state === 'stopped',
+  }
+})
+
+const getStateText = (state: string) => {
+  const stateMap: Record<string, string> = {
+    stopped: '已停止',
+    starting: '启动中',
+    warmup: '预热中',
+    idle: '空闲',
+    busy: '忙碌',
+    degraded: '降级',
+    unhealthy: '不健康',
+    restarting: '重启中',
+    stopping: '停止中',
+  }
+  return stateMap[state] || state
+}
+
+const handleStart = async () => {
+  actionInProgress.value = true
+  try {
+    await startService(props.service.id)
+    info(`[ServiceCard] 服务 ${props.service.name} 已启动`)
+    emit('updated')
+  } catch (err) {
+    logError(`[ServiceCard] 启动服务失败:`, err)
+  } finally {
+    actionInProgress.value = false
+  }
+}
+
+const handleStop = async () => {
+  actionInProgress.value = true
+  try {
+    await stopService(props.service.id)
+    info(`[ServiceCard] 服务 ${props.service.name} 已停止`)
+    emit('updated')
+  } catch (err) {
+    logError(`[ServiceCard] 停止服务失败:`, err)
+  } finally {
+    actionInProgress.value = false
+  }
+}
+
+const handleRestart = async () => {
+  actionInProgress.value = true
+  try {
+    await restartService(props.service.id)
+    info(`[ServiceCard] 服务 ${props.service.name} 已重启`)
+    emit('updated')
+  } catch (err) {
+    logError(`[ServiceCard] 重启服务失败:`, err)
+  } finally {
+    actionInProgress.value = false
+  }
+}
+
+// 订阅服务事件（实时更新状态）
+onMounted(() => {
+  const unsubscribeState = onServiceStateChanged((event) => {
+    if (event.service_id === props.service.id) {
+      // 状态变化，触发更新
+      emit('updated')
+    }
+  })
+
+  const unsubscribeError = onServiceError((event) => {
+    if (event.service_id === props.service.id) {
+      // 错误事件，触发更新
+      emit('updated')
+    }
+  })
+
+  onUnmounted(() => {
+    unsubscribeState()
+    unsubscribeError()
+  })
+})
+</script>
+
+<style scoped>
+.service-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 12px;
+  transition: all 0.2s;
+}
+
+.service-card.healthy {
+  border-color: rgba(34, 197, 94, 0.5);
+}
+
+.service-card.degraded {
+  border-color: rgba(251, 146, 60, 0.5);
+}
+
+.service-card.unhealthy {
+  border-color: rgba(239, 68, 68, 0.5);
+}
+
+.service-card.stopped {
+  border-color: var(--border-color);
+  opacity: 0.8;
+}
+
+.service-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.service-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-secondary);
+  transition: background 0.2s;
+}
+
+.status-dot.active {
+  background: #22c55e;
+}
+
+.status-dot.degraded {
+  background: #fb923c;
+}
+
+.status-dot.error {
+  background: #ef4444;
+}
+
+.service-name {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.service-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.action-btn {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 4px 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.action-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--text-primary);
+}
+
+.action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.service-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.service-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.state-label {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.state-value {
+  font-weight: 500;
+  font-size: 13px;
+}
+
+.state-value.state-idle {
+  color: #22c55e;
+}
+
+.state-value.state-busy {
+  color: #3b82f6;
+}
+
+.state-value.state-degraded {
+  color: #fb923c;
+}
+
+.state-value.state-unhealthy {
+  color: #ef4444;
+}
+
+.state-value.state-stopped {
+  color: var(--text-secondary);
+}
+
+.service-message {
+  color: var(--text-primary);
+  font-size: 13px;
+  padding: 8px;
+  background: var(--bg-primary);
+  border-radius: 4px;
+}
+
+.service-description {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+</style>
+
